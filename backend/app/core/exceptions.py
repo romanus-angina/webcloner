@@ -62,7 +62,7 @@ class ProcessingError(WebsiteClonerException):
     """Exception raised during content processing."""
     
     def __init__(self, message: str, stage: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
-        processing_details = details or {}
+        processing_details = dict(details) if details else {}
         if stage:
             processing_details["stage"] = stage
         super().__init__(message, "PROCESSING_ERROR", processing_details)
