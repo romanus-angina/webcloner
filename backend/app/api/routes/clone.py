@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import List
-from datetime import datetime
+from datetime import datetime, UTC
 import uuid
 
 from ...dependencies import (
@@ -229,7 +229,7 @@ async def list_sessions(
             progress=session_data.get("progress", []),
             result=session_data.get("result"),
             created_at=session_data.get("created_at"),
-            updated_at=session_data.get("updated_at", datetime.utcnow()),
+            updated_at=session_data.get("updated_at", datetime.now(UTC)),
             estimated_completion=session_data.get("estimated_completion"),
             error_message=session_data.get("error_message")
         )
