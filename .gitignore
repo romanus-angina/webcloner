@@ -8,3 +8,4 @@ __pycache__/
 data/screenshots/
 data/generated/
 data/assets/
+.DS_Store

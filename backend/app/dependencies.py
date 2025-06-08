@@ -8,7 +8,7 @@ from datetime import datetime, UTC
 
 from .config import Settings, settings
 from .services.browser_manager import BrowserManager, browser_manager
-
+from .services.screenshot_service import ScreenshotService, screenshot_service
 
 # Global application state
 class ApplicationState:
@@ -279,6 +279,14 @@ async def get_browser_health():
     manager = get_browser_manager()
     return await manager.health_check()
 
+def get_screenshot_service() -> ScreenshotService:
+    """
+    Get the global screenshot service instance.
+    
+    Returns:
+        ScreenshotService: Global screenshot service
+    """
+    return screenshot_service
 
 # Common dependency combinations
 CommonDeps = Depends(get_settings)
@@ -288,3 +296,4 @@ RequestIdDeps = Depends(get_request_id)
 RateLimitDeps = Depends(check_rate_limit)
 BrowserManagerDeps = Depends(get_browser_manager)
 BrowserServiceDeps = Depends(get_browser_service)
+ScreenshotServiceDeps = Depends(get_screenshot_service)

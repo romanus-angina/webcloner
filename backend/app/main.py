@@ -20,9 +20,6 @@ from .core.exceptions import (
     get_http_status_code
 )
 from .models.responses import ErrorResponse, HealthResponse
-
-
-# Configure logging using our centralized system
 from .utils.logger import setup_logging, get_logger
 
 # Initialize logging
@@ -269,9 +266,12 @@ async def get_version():
 
 
 # Include routers
-from .api.routes import clone, health
+from .api.routes import clone, health, screenshot
+
 app.include_router(clone.router, prefix=settings.api_v1_prefix, tags=["Cloning"])
 app.include_router(health.router, prefix=settings.api_v1_prefix, tags=["Health Extended"])
+app.include_router(screenshot.router, prefix=settings.api_v1_prefix + "/screenshots", tags=["Screenshots"])
+
 # WebSocket router will be added in the next phase
 # from .api.routes import websocket
 # app.include_router(websocket.router, prefix=settings.api_v1_prefix, tags=["WebSocket"])
