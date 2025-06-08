@@ -147,64 +147,109 @@ class DOMExtractionService:
         }
 
     def _get_dom_extractor_script(self) -> str:
-        """JavaScript for DOM structure extraction."""
+        """Clean DOM extraction script for production use."""
         return """
         (() => {
             function extractAllElements() {
                 const elements = [];
-                const allNodes = document.querySelectorAll('body, body *');
+                const allNodes = document.querySelectorAll('*');
 
-                for (const element of allNodes) {
+                for (let i = 0; i < allNodes.length; i++) {
+                    const element = allNodes[i];
+                    
                     try {
-                        const style = window.getComputedStyle(element);
+                        const tagName = element.tagName.toLowerCase();
+                        
+                        // Skip only script and style tags
+                        if (tagName === 'script' || tagName === 'style') {
+                            continue;
+                        }
+                        
+                        // Extract attributes safely
                         const attributes = {};
-                        for (const attr of element.attributes) {
-                            attributes[attr.name] = attr.value;
+                        if (element.attributes) {
+                            for (let j = 0; j < element.attributes.length; j++) {
+                                const attr = element.attributes[j];
+                                if (attr && attr.name && attr.value !== undefined) {
+                                    attributes[attr.name] = attr.value;
+                                }
+                            }
+                        }
+                        
+                        // Extract text content (direct text only, not nested)
+                        let textContent = '';
+                        if (element.childNodes) {
+                            for (let k = 0; k < element.childNodes.length; k++) {
+                                const node = element.childNodes[k];
+                                if (node && node.nodeType === 3 && node.textContent) {
+                                    textContent += node.textContent;
+                                }
+                            }
+                        }
+                        textContent = textContent.trim();
+                        
+                        // Extract classes
+                        const classNames = [];
+                        if (element.className && typeof element.className === 'string') {
+                            const classes = element.className.trim();
+                            if (classes) {
+                                classNames.push(...classes.split(/\\s+/).filter(cls => cls.length > 0));
+                            }
+                        }
+                        
+                        // Get computed styles
+                        const computedStyles = {
+                            'display': 'block',
+                            'box-shadow': 'none',
+                            'border': 'none',
+                            'padding': '0px'
+                        };
+                        
+                        try {
+                            const style = window.getComputedStyle(element);
+                            if (style) {
+                                computedStyles['display'] = style.display || 'block';
+                                computedStyles['box-shadow'] = style.boxShadow || 'none';
+                                computedStyles['border'] = style.border || 'none';
+                                computedStyles['padding'] = style.padding || '0px';
+                            }
+                        } catch (e) {
+                            // Use defaults if getComputedStyle fails
                         }
 
-                        // Get direct text content, ignoring child element text
-                        const textContent = Array.from(element.childNodes)
-                            .filter(node => node.nodeType === Node.TEXT_NODE)
-                            .map(node => node.textContent)
-                            .join(' ')
-                            .trim();
-
+                        // Create element data
                         const elementData = {
-                            tag_name: element.tagName.toLowerCase(),
+                            tag_name: tagName,
                             element_id: element.id || null,
-                            class_names: element.className && typeof element.className === 'string' 
-                                ? element.className.trim().split(/\\s+/).filter(Boolean) 
-                                : [],
-                            computed_styles: { // Focus on styles critical for layout/component detection
-                                display: style.getPropertyValue('display'),
-                                'box-shadow': style.getPropertyValue('box-shadow'),
-                                border: style.getPropertyValue('border'),
-                                padding: style.getPropertyValue('padding')
-                            },
+                            class_names: classNames,
+                            computed_styles: computedStyles,
                             attributes: attributes,
                             text_content: textContent || null,
-                            children_count: element.children.length,
-                            xpath: null, // De-prioritize complex XPath for stability
+                            children_count: element.children ? element.children.length : 0,
+                            xpath: null,
                             bounding_box: null,
                             is_visible: true,
                             z_index: 0
                         };
+                        
                         elements.push(elementData);
+                        
                     } catch (e) {
-                        // If one element fails, we log it but don't stop the process.
-                        console.error('Could not process element:', element, e.message);
+                        // Skip elements that can't be processed
+                        continue;
                     }
                 }
-
+                
                 return {
                     elements: elements,
                     total_elements: elements.length,
-                    dom_depth: 0 // Not critical for component detection
+                    dom_depth: 0
                 };
             }
+            
             return extractAllElements();
         })()
-        """
+        """        
     
     def _get_asset_extractor_script(self) -> str:
         """JavaScript for asset discovery."""

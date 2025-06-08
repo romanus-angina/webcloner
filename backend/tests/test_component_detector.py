@@ -1,6 +1,9 @@
 import pytest
 import time
 from dataclasses import asdict
+import os
+import tempfile
+import urllib.parse
 
 from app.services.browser_manager import BrowserManager
 from app.services.dom_extraction_service import DOMExtractionService, DOMExtractionResult, ExtractedElement, PageStructure
@@ -182,7 +185,8 @@ async def test_component_detection_integration_flow():
     </html>
     """
     # Use a data URL to avoid network requests
-    test_url = f"data:text/html,{test_html_content}"
+    encoded_html = urllib.parse.quote(test_html_content.strip())
+    test_url = f"data:text/html,{encoded_html}"
     
     # 2. Initialize the real services needed for the integration test
     browser_manager = BrowserManager()
@@ -200,11 +204,42 @@ async def test_component_detection_integration_flow():
         
         # --- DEBUGGING STEP ---
         # Let's inspect the data that the detector will receive.
-        print("\n--- DEBUG: Inspecting extracted elements from DOMExtractionService ---")
+        print("\n--- DEBUG: All extracted elements from DOMExtractionService ---")
+        for i, element in enumerate(dom_result.elements):
+            print(f"Element {i}: Tag='{element.tag_name}', ID='{element.element_id}', Classes={element.class_names}")
+            if element.attributes:
+                print(f"  Attributes: {element.attributes}")
+            if element.text_content:
+                print(f"  Text: '{element.text_content}'")
+            print()
+
+        print("--- Looking specifically for button-like elements ---")
         for element in dom_result.elements:
-            if element.tag_name == 'a':
-                print(f"Found <a> tag: Attributes={element.attributes}, Classes={element.class_names}")
-        print("--- END DEBUG ---\n")
+            if element.tag_name == 'button':
+                print(f"Found BUTTON: {element.text_content}, Classes: {element.class_names}")
+            elif element.tag_name == 'a':
+                print(f"Found A tag: Role='{element.attributes.get('role', 'NONE')}', Classes: {element.class_names}")
+                print(f"  Href: {element.attributes.get('href', 'NONE')}")
+                print(f"  Text: '{element.text_content}'")
+            elif element.tag_name == 'input':
+                input_type = element.attributes.get('type', 'text')
+                print(f"Found INPUT: Type='{input_type}', Placeholder: '{element.attributes.get('placeholder', 'NONE')}'")
+        print("--- END ENHANCED DEBUG ---\n")
+        print(f"\n=== DOM EXTRACTION VERIFICATION ===")
+        print(f"Success: {dom_result.success}")
+        print(f"Error: {dom_result.error_message}")
+        print(f"Total elements: {dom_result.total_elements}")
+        print(f"Elements found: {len(dom_result.elements)}")
+
+        # Check if we're missing the A tag specifically
+        expected_tags = ['html', 'body', 'a', 'button']
+        found_tags = [el.tag_name for el in dom_result.elements]
+        missing_tags = [tag for tag in expected_tags if tag not in found_tags]
+        print(f"Missing tags: {missing_tags}")
+
+        # Print ALL tag names found
+        print(f"All tags found: {found_tags}")
+        print(f"=== END VERIFICATION ===\n")
         # --- END DEBUGGING STEP ---
 
         # 4. Feed the real result into the Component Detector
@@ -228,4 +263,156 @@ async def test_component_detection_integration_flow():
 
     finally:
         # 6. Ensure resources are cleaned up
+        await browser_manager.cleanup()
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_tag_extraction_specifically():
+    """
+    Focused test to verify that <a> tags are being extracted properly.
+    """
+    test_html_content = """
+    <html>
+        <body>
+            <a href="#" role="button" class="button-link">Submit Link</a>
+            <a href="https://example.com">Regular Link</a>
+            <button>Regular Button</button>
+        </body>
+    </html>
+    """
+    encoded_html = urllib.parse.quote(test_html_content.strip())
+    test_url = f"data:text/html,{encoded_html}"
+    
+    browser_manager = BrowserManager()
+    await browser_manager.initialize()
+
+    try:
+        dom_service = DOMExtractionService(browser_manager)
+        dom_result = await dom_service.extract_dom_structure(
+            url=test_url,
+            session_id="a-tag-test-session"
+        )
+        
+        assert dom_result.success, "DOM extraction failed"
+        
+        # Debug: Print all extracted elements
+        print("\n--- A Tag Extraction Test ---")
+        for element in dom_result.elements:
+            print(f"Tag: {element.tag_name}, Attributes: {element.attributes}")
+        
+        # Check that we have A tags
+        a_tags = [el for el in dom_result.elements if el.tag_name == 'a']
+        print(f"Found {len(a_tags)} A tags")
+        
+        assert len(a_tags) == 2, f"Expected 2 A tags, found {len(a_tags)}"
+        
+        # Check the button-role A tag specifically
+        button_a_tags = [el for el in a_tags if el.attributes.get('role') == 'button']
+        assert len(button_a_tags) == 1, f"Expected 1 A tag with role=button, found {len(button_a_tags)}"
+        
+        print("✅ A tag extraction working correctly!")
+        
+    finally:
+        await browser_manager.cleanup()
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_html_loading_debug():
+    """Debug test to verify HTML is actually loading."""
+    test_html_content = """
+    <html>
+        <body>
+            <a href="#" role="button" class="button-link">Submit Link</a>
+            <a href="https://example.com">Regular Link</a>
+            <button>Regular Button</button>
+        </body>
+    </html>
+    """
+    encoded_html = urllib.parse.quote(test_html_content.strip())
+    test_url = f"data:text/html,{encoded_html}"
+    
+    browser_manager = BrowserManager()
+    await browser_manager.initialize()
+
+    try:
+        async with browser_manager.page_context() as page:
+            await browser_manager.navigate_to_url(page, test_url, wait_for="networkidle")
+            
+            # Check what HTML is actually loaded
+            html_content = await page.content()
+            print(f"\n=== ACTUAL HTML CONTENT ===")
+            print(html_content)
+            print(f"=== END HTML CONTENT ===\n")
+            
+            # Check if elements exist in DOM
+            a_count = await page.evaluate("document.querySelectorAll('a').length")
+            button_count = await page.evaluate("document.querySelectorAll('button').length")
+            
+            print(f"A tags in DOM: {a_count}")
+            print(f"Button tags in DOM: {button_count}")
+            
+            # Test the extraction directly
+            simple_extraction = await page.evaluate("""
+                Array.from(document.querySelectorAll('*')).map(el => ({
+                    tag: el.tagName.toLowerCase(),
+                    id: el.id || null,
+                    classes: el.className || '',
+                    text: el.textContent ? el.textContent.trim() : ''
+                }))
+            """)
+            
+            print(f"\n=== SIMPLE EXTRACTION ===")
+            for elem in simple_extraction:
+                print(f"Tag: {elem['tag']}, ID: {elem['id']}, Classes: {elem['classes']}, Text: {elem['text']}")
+            print(f"=== END SIMPLE EXTRACTION ===\n")
+            
+    finally:
+        await browser_manager.cleanup()
+    
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_tag_extraction_with_file():
+    """Test A tag extraction using properly encoded data URL (instead of file)."""
+    test_html_content = """<!DOCTYPE html>
+<html>
+    <head><title>Test Page</title></head>
+    <body>
+        <a href="#" role="button" class="button-link">Submit Link</a>
+        <a href="https://example.com">Regular Link</a>
+        <button>Regular Button</button>
+    </body>
+</html>"""
+    
+    # Use data URL instead of file URL (cloud browsers can't access local files)
+    encoded_html = urllib.parse.quote(test_html_content.strip())
+    test_url = f"data:text/html,{encoded_html}"
+    
+    browser_manager = BrowserManager()
+    await browser_manager.initialize()
+
+    try:
+        dom_service = DOMExtractionService(browser_manager)
+        dom_result = await dom_service.extract_dom_structure(
+            url=test_url,
+            session_id="file-test-session"
+        )
+        
+        assert dom_result.success, f"DOM extraction failed: {dom_result.error_message}"
+        
+        # Debug: Print all extracted elements
+        print("\n--- File-based A Tag Extraction Test ---")
+        for element in dom_result.elements:
+            print(f"Tag: {element.tag_name}, Attributes: {element.attributes}")
+        
+        # Check that we have A tags
+        a_tags = [el for el in dom_result.elements if el.tag_name == 'a']
+        button_tags = [el for el in dom_result.elements if el.tag_name == 'button']
+        
+        print(f"Found {len(a_tags)} A tags")
+        print(f"Found {len(button_tags)} button tags")
+        
+        assert len(a_tags) == 2, f"Expected 2 A tags, found {len(a_tags)}"
+        assert len(button_tags) == 1, f"Expected 1 button tag, found {len(button_tags)}"
+        
+    finally:
         await browser_manager.cleanup()
