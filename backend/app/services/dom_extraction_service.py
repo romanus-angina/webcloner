@@ -147,186 +147,223 @@ class DOMExtractionService:
             "asset_extractor": self._get_asset_extractor_script(),
             "layout_analyzer": self._get_layout_analyzer_script()
         }
-    
+
     def _get_dom_extractor_script(self) -> str:
         """JavaScript for DOM structure extraction."""
         return """
-        function extractDOMStructure() {
-            const elements = [];
-            
-            function getXPath(element) {
-                if (element.id) {
-                    return `//*[@id="${element.id}"]`;
+        (() => {
+            function extractDOMStructure() {
+                const elements = [];
+                
+                function getXPath(element) {
+                    if (element.id) {
+                        return `//*[@id="${element.id}"]`;
+                    }
+                    
+                    let path = '';
+                    let current = element;
+                    
+                    while (current && current.nodeType === Node.ELEMENT_NODE) {
+                        let selector = current.nodeName.toLowerCase();
+                        if (current.className && typeof current.className === 'string') {
+                            const classes = current.className.trim().split(/\\s+/);
+                            if (classes.length > 0 && classes[0]) {
+                                selector += '.' + classes[0];
+                            }
+                        }
+                        
+                        let index = 1;
+                        let sibling = current.previousElementSibling;
+                        while (sibling) {
+                            if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
+                                index++;
+                            }
+                            sibling = sibling.previousElementSibling;
+                        }
+                        
+                        if (index > 1) {
+                            selector += `[${index}]`;
+                        }
+                        
+                        path = '/' + selector + path;
+                        current = current.parentElement;
+                    }
+                    
+                    return path;
                 }
                 
-                let path = '';
-                let current = element;
-                
-                while (current && current.nodeType === Node.ELEMENT_NODE) {
-                    let selector = current.nodeName.toLowerCase();
-                    if (current.className && typeof current.className === 'string') {
-                        const classes = current.className.trim().split(/\\s+/);
-                        if (classes.length > 0 && classes[0]) {
-                            selector += '.' + classes[0];
-                        }
+                function getBoundingBox(element) {
+                    try {
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height,
+                            top: rect.top,
+                            right: rect.right,
+                            bottom: rect.bottom,
+                            left: rect.left
+                        };
+                    } catch (e) {
+                        return null;
                     }
-                    
-                    let index = 1;
-                    let sibling = current.previousElementSibling;
-                    while (sibling) {
-                        if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
-                            index++;
-                        }
-                        sibling = sibling.previousElementSibling;
-                    }
-                    
-                    if (index > 1) {
-                        selector += `[${index}]`;
-                    }
-                    
-                    path = '/' + selector + path;
-                    current = current.parentElement;
                 }
                 
-                return path;
-            }
-            
-            function getBoundingBox(element) {
-                try {
-                    const rect = element.getBoundingClientRect();
-                    return {
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height,
-                        top: rect.top,
-                        right: rect.right,
-                        bottom: rect.bottom,
-                        left: rect.left
-                    };
-                } catch (e) {
-                    return null;
+                function isElementVisible(element) {
+                    try {
+                        const style = window.getComputedStyle(element);
+                        const rect = element.getBoundingClientRect();
+                        
+                        return style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            style.opacity !== '0' &&
+                            rect.width > 0 &&
+                            rect.height > 0;
+                    } catch (e) {
+                        return true;
+                    }
                 }
-            }
-            
-            function isElementVisible(element) {
-                try {
-                    const style = window.getComputedStyle(element);
-                    const rect = element.getBoundingClientRect();
-                    
-                    return style.display !== 'none' &&
-                           style.visibility !== 'hidden' &&
-                           style.opacity !== '0' &&
-                           rect.width > 0 &&
-                           rect.height > 0;
-                } catch (e) {
-                    return true;
-                }
-            }
-            
-            function extractElement(element, maxDepth = 10, currentDepth = 0) {
-                if (currentDepth > maxDepth) return null;
                 
-                try {
-                    const computedStyle = window.getComputedStyle(element);
-                    const attributes = {};
+                function extractElement(element, maxDepth = 10, currentDepth = 0) {
+                    if (currentDepth > maxDepth) return null;
                     
-                    // Get important attributes
-                    for (let attr of element.attributes) {
-                        if (['href', 'src', 'alt', 'title', 'data-*', 'aria-*'].some(pattern => 
-                            pattern.includes('*') ? attr.name.startsWith(pattern.replace('*', '')) : attr.name === pattern)) {
-                            attributes[attr.name] = attr.value;
+                    try {
+                        const computedStyle = window.getComputedStyle(element);
+                        const attributes = {};
+                        
+                        // Get important attributes
+                        for (let attr of element.attributes) {
+                            if (['href', 'src', 'alt', 'title', 'data-*', 'aria-*'].some(pattern => 
+                                pattern.includes('*') ? attr.name.startsWith(pattern.replace('*', '')) : attr.name === pattern)) {
+                                attributes[attr.name] = attr.value;
+                            }
                         }
-                    }
-                    
-                    // Get key computed styles
-                    const importantStyles = [
-                        'display', 'position', 'float', 'clear',
-                        'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
-                        'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
-                        'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-                        'border', 'border-width', 'border-style', 'border-color', 'border-radius',
-                        'background', 'background-color', 'background-image', 'background-size', 'background-position',
-                        'color', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height',
-                        'text-align', 'text-decoration', 'text-transform',
-                        'z-index', 'opacity', 'visibility', 'overflow', 'overflow-x', 'overflow-y',
-                        'flex', 'flex-direction', 'justify-content', 'align-items', 'flex-wrap',
-                        'grid', 'grid-template-columns', 'grid-template-rows', 'grid-gap'
-                    ];
-                    
-                    const styles = {};
-                    visualStyles.forEach(prop => {
-                        const value = computedStyle.getPropertyValue(prop);
-                        if (value && value !== 'auto' && value !== 'none' && value !== 'normal' && value !== 'initial') {
-                            styles[prop] = value;
-                        }
-                    });
-                    
-                    const elementData = {
-                        tag_name: element.tagName.toLowerCase(),
-                        element_id: element.id || null,
-                        class_names: element.className ? element.className.trim().split(/\\s+/).filter(Boolean) : [],
-                        computed_styles: styles,
-                        attributes: attributes,
-                        text_content: element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE
-                            ? element.textContent.trim() : null,
-                        children_count: element.children.length,
-                        xpath: getXPath(element),
-                        bounding_box: getBoundingBox(element),
-                        is_visible: isElementVisible(element),
-                        z_index: computedStyle.zIndex !== 'auto' ? parseInt(computedStyle.zIndex) || null : null
-                    };
-                    
-                    return elementData;
-                } catch (e) {
-                    console.warn('Error extracting element:', e);
-                    return null;
-                }
-            }
-            
-            // Extract all visible elements
-            const allElements = document.querySelectorAll('*');
-            
-            for (let element of allElements) {
-                if (element.tagName && !['SCRIPT', 'STYLE', 'META', 'LINK', 'TITLE'].includes(element.tagName)) {
-                    const extracted = extractElement(element);
-                    if (extracted) {
-                        elements.push(extracted);
+                        
+                        // Get key computed styles
+                        const importantStyles = [
+                            'display', 'position', 'float', 'clear',
+                            'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+                            'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+                            'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+                            'border', 'border-width', 'border-style', 'border-color', 'border-radius',
+                            'background', 'background-color', 'background-image', 'background-size', 'background-position',
+                            'color', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height',
+                            'text-align', 'text-decoration', 'text-transform',
+                            'z-index', 'opacity', 'visibility', 'overflow', 'overflow-x', 'overflow-y',
+                            'flex', 'flex-direction', 'justify-content', 'align-items', 'flex-wrap',
+                            'grid', 'grid-template-columns', 'grid-template-rows', 'grid-gap'
+                        ];
+                        
+                        const styles = {};
+                        importantStyles.forEach(prop => {
+                            const value = computedStyle.getPropertyValue(prop);
+                            if (value && value !== 'auto' && value !== 'none' && value !== 'normal' && value !== 'initial') {
+                                styles[prop] = value;
+                            }
+                        });
+                        
+                        const elementData = {
+                            tag_name: element.tagName.toLowerCase(),
+                            element_id: element.id || null,
+                            class_names: element.className ? element.className.trim().split(/\\s+/).filter(Boolean) : [],
+                            computed_styles: styles,
+                            attributes: attributes,
+                            text_content: element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE
+                                ? element.textContent.trim() : null,
+                            children_count: element.children.length,
+                            xpath: getXPath(element),
+                            bounding_box: getBoundingBox(element),
+                            is_visible: isElementVisible(element),
+                            z_index: computedStyle.zIndex !== 'auto' ? parseInt(computedStyle.zIndex) || null : null
+                        };
+                        
+                        return elementData;
+                    } catch (e) {
+                        console.warn('Error extracting element:', e);
+                        return null;
                     }
                 }
+                
+                // Extract all visible elements
+                const allElements = document.querySelectorAll('*');
+                
+                for (let element of allElements) {
+                    if (element.tagName && !['SCRIPT', 'STYLE', 'META', 'LINK', 'TITLE'].includes(element.tagName)) {
+                        const extracted = extractElement(element);
+                        if (extracted) {
+                            elements.push(extracted);
+                        }
+                    }
+                }
+                
+                return {
+                    elements: elements,
+                    dom_depth: Math.max(...elements.map(el => (el.xpath || '').split('/').length - 1)),
+                    total_elements: elements.length
+                };
             }
-            
-            return {
-                elements: elements,
-                dom_depth: Math.max(...elements.map(el => (el.xpath || '').split('/').length - 1)),
-                total_elements: elements.length
-            };
-        }
-        
-        return extractDOMStructure();
+
+            return extractDOMStructure();
+        })()
         """
     
     def _get_style_extractor_script(self) -> str:
         """JavaScript for stylesheet extraction."""
         return """
-        function extractStylesheets() {
-            const stylesheets = [];
-            
-            // Extract external stylesheets
-            const linkElements = document.querySelectorAll('link[rel="stylesheet"]');
-            for (let link of linkElements) {
-                try {
-                    const stylesheet = {
-                        href: link.href,
-                        media: link.media || 'all',
-                        inline: false,
-                        rules: []
-                    };
-                    
-                    // Try to access rules if same-origin
+        (() => {
+            function extractStylesheets() {
+                const stylesheets = [];
+                
+                // Extract external stylesheets
+                const linkElements = document.querySelectorAll('link[rel="stylesheet"]');
+                for (let link of linkElements) {
                     try {
-                        if (link.sheet && link.sheet.cssRules) {
-                            for (let rule of link.sheet.cssRules) {
+                        const stylesheet = {
+                            href: link.href,
+                            media: link.media || 'all',
+                            inline: false,
+                            rules: []
+                        };
+                        
+                        // Try to access rules if same-origin
+                        try {
+                            if (link.sheet && link.sheet.cssRules) {
+                                for (let rule of link.sheet.cssRules) {
+                                    if (rule.type === CSSRule.STYLE_RULE) {
+                                        stylesheet.rules.push({
+                                            selector: rule.selectorText,
+                                            styles: rule.style.cssText,
+                                            specificity: calculateSpecificity(rule.selectorText)
+                                        });
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin stylesheet, can't access rules
+                            console.warn('Cannot access stylesheet rules (CORS):', link.href);
+                        }
+                        
+                        stylesheets.push(stylesheet);
+                    } catch (e) {
+                        console.warn('Error processing stylesheet:', e);
+                    }
+                }
+                
+                // Extract inline styles
+                const styleElements = document.querySelectorAll('style');
+                for (let style of styleElements) {
+                    try {
+                        const stylesheet = {
+                            href: null,
+                            media: style.media || 'all',
+                            inline: true,
+                            content: style.textContent,
+                            rules: []
+                        };
+                        
+                        if (style.sheet && style.sheet.cssRules) {
+                            for (let rule of style.sheet.cssRules) {
                                 if (rule.type === CSSRule.STYLE_RULE) {
                                     stylesheet.rules.push({
                                         selector: rule.selectorText,
@@ -336,282 +373,253 @@ class DOMExtractionService:
                                 }
                             }
                         }
+                        
+                        stylesheets.push(stylesheet);
                     } catch (e) {
-                        // Cross-origin stylesheet, can't access rules
-                        console.warn('Cannot access stylesheet rules (CORS):', link.href);
+                        console.warn('Error processing inline stylesheet:', e);
                     }
-                    
-                    stylesheets.push(stylesheet);
-                } catch (e) {
-                    console.warn('Error processing stylesheet:', e);
                 }
-            }
-            
-            // Extract inline styles
-            const styleElements = document.querySelectorAll('style');
-            for (let style of styleElements) {
-                try {
-                    const stylesheet = {
-                        href: null,
-                        media: style.media || 'all',
-                        inline: true,
-                        content: style.textContent,
-                        rules: []
-                    };
+                
+                function calculateSpecificity(selector) {
+                    if (!selector) return 0;
                     
-                    if (style.sheet && style.sheet.cssRules) {
-                        for (let rule of style.sheet.cssRules) {
-                            if (rule.type === CSSRule.STYLE_RULE) {
-                                stylesheet.rules.push({
-                                    selector: rule.selectorText,
-                                    styles: rule.style.cssText,
-                                    specificity: calculateSpecificity(rule.selectorText)
-                                });
-                            }
-                        }
-                    }
+                    let specificity = 0;
                     
-                    stylesheets.push(stylesheet);
-                } catch (e) {
-                    console.warn('Error processing inline stylesheet:', e);
+                    // Count IDs
+                    const ids = (selector.match(/#[a-zA-Z0-9_-]+/g) || []).length;
+                    specificity += ids * 100;
+                    
+                    // Count classes, attributes, and pseudo-classes
+                    const classes = (selector.match(/\\.[a-zA-Z0-9_-]+/g) || []).length;
+                    const attributes = (selector.match(/\\[[^\\]]+\\]/g) || []).length;
+                    const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+/g) || []).length;
+                    specificity += (classes + attributes + pseudoClasses) * 10;
+                    
+                    // Count elements and pseudo-elements
+                    const elements = (selector.match(/^[a-zA-Z0-9]+|\\s[a-zA-Z0-9]+/g) || []).length;
+                    const pseudoElements = (selector.match(/::[a-zA-Z0-9_-]+/g) || []).length;
+                    specificity += elements + pseudoElements;
+                    
+                    return specificity;
                 }
+                
+                return {
+                    stylesheets: stylesheets,
+                    total_stylesheets: stylesheets.length
+                };
             }
             
-            function calculateSpecificity(selector) {
-                if (!selector) return 0;
-                
-                let specificity = 0;
-                
-                // Count IDs
-                const ids = (selector.match(/#[a-zA-Z0-9_-]+/g) || []).length;
-                specificity += ids * 100;
-                
-                // Count classes, attributes, and pseudo-classes
-                const classes = (selector.match(/\\.[a-zA-Z0-9_-]+/g) || []).length;
-                const attributes = (selector.match(/\\[[^\\]]+\\]/g) || []).length;
-                const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+/g) || []).length;
-                specificity += (classes + attributes + pseudoClasses) * 10;
-                
-                // Count elements and pseudo-elements
-                const elements = (selector.match(/^[a-zA-Z0-9]+|\\s[a-zA-Z0-9]+/g) || []).length;
-                const pseudoElements = (selector.match(/::[a-zA-Z0-9_-]+/g) || []).length;
-                specificity += elements + pseudoElements;
-                
-                return specificity;
-            }
-            
-            return {
-                stylesheets: stylesheets,
-                total_stylesheets: stylesheets.length
-            };
-        }
-        
-        return extractStylesheets();
+            return extractStylesheets();
+        })()
         """
     
     def _get_asset_extractor_script(self) -> str:
         """JavaScript for asset discovery."""
         return """
-        function extractAssets() {
-            const assets = [];
-            const processedUrls = new Set();
-            
-            function addAsset(url, type, element = null, context = []) {
-                if (!url || processedUrls.has(url)) return;
-                processedUrls.add(url);
+        (() => {
+            function extractAssets() {
+                const assets = [];
+                const processedUrls = new Set();
                 
-                const asset = {
-                    url: url,
-                    asset_type: type,
-                    usage_context: context,
-                    is_background: false
-                };
-                
-                if (element) {
-                    if (element.alt) asset.altText = element.alt;
-                    if (element.naturalWidth && element.naturalHeight) {
-                        asset.dimensions = [element.naturalWidth, element.naturalHeight];
-                    }
-                }
-                
-                assets.push(asset);
-            }
-            
-            // Extract images
-            const images = document.querySelectorAll('img[src]');
-            for (let img of images) {
-                addAsset(img.src, 'image', img, ['img-tag']);
-            }
-            
-            // Extract background images from computed styles
-            const allElements = document.querySelectorAll('*');
-            for (let element of allElements) {
-                try {
-                    const style = window.getComputedStyle(element);
-                    const bgImage = style.backgroundImage;
+                function addAsset(url, type, element = null, context = []) {
+                    if (!url || processedUrls.has(url)) return;
+                    processedUrls.add(url);
                     
-                    if (bgImage && bgImage !== 'none') {
-                        const urlMatch = bgImage.match(/url\\(["']?([^"')]+)["']?\\)/);
-                        if (urlMatch) {
-                            const asset = {
-                                url: urlMatch[1],
-                                asset_type: 'image',
-                                usage_context: ['background-image'],
-                                is_background: true
-                            };
-                            
-                            if (!processedUrls.has(asset.url)) {
-                                processedUrls.add(asset.url);
-                                assets.push(asset);
-                            }
+                    const asset = {
+                        url: url,
+                        asset_type: type,
+                        usage_context: context,
+                        is_background: false
+                    };
+                    
+                    if (element) {
+                        if (element.alt) asset.altText = element.alt;
+                        if (element.naturalWidth && element.naturalHeight) {
+                            asset.dimensions = [element.naturalWidth, element.naturalHeight];
                         }
                     }
-                } catch (e) {
-                    // Skip elements that can't be accessed
+                    
+                    assets.push(asset);
                 }
-            }
-            
-            // Extract fonts
-            const fontUrls = new Set();
-            for (let stylesheet of document.styleSheets) {
-                try {
-                    for (let rule of stylesheet.cssRules) {
-                        if (rule.type === CSSRule.FONT_FACE_RULE) {
-                            const src = rule.style.src;
-                            if (src) {
-                                const urlMatches = src.match(/url\\(["']?([^"')]+)["']?\\)/g);
-                                if (urlMatches) {
-                                    urlMatches.forEach(match => {
-                                        const url = match.match(/url\\(["']?([^"')]+)["']?\\)/)[1];
-                                        addAsset(url, 'font', null, ['font-face']);
-                                    });
+                
+                // Extract images
+                const images = document.querySelectorAll('img[src]');
+                for (let img of images) {
+                    addAsset(img.src, 'image', img, ['img-tag']);
+                }
+                
+                // Extract background images from computed styles
+                const allElements = document.querySelectorAll('*');
+                for (let element of allElements) {
+                    try {
+                        const style = window.getComputedStyle(element);
+                        const bgImage = style.backgroundImage;
+                        
+                        if (bgImage && bgImage !== 'none') {
+                            const urlMatch = bgImage.match(/url\\(["']?([^"')]+)["']?\\)/);
+                            if (urlMatch) {
+                                const asset = {
+                                    url: urlMatch[1],
+                                    asset_type: 'image',
+                                    usage_context: ['background-image'],
+                                    is_background: true
+                                };
+                                
+                                if (!processedUrls.has(asset.url)) {
+                                    processedUrls.add(asset.url);
+                                    assets.push(asset);
                                 }
                             }
                         }
+                    } catch (e) {
+                        // Skip elements that can't be accessed
                     }
-                } catch (e) {
-                    // Can't access cross-origin stylesheets
                 }
-            }
-            
-            // Extract videos and audio
-            const videos = document.querySelectorAll('video[src], video source[src]');
-            for (let video of videos) {
-                addAsset(video.src, 'video', null, ['video-tag']);
-            }
-            
-            const audios = document.querySelectorAll('audio[src], audio source[src]');
-            for (let audio of audios) {
-                addAsset(audio.src, 'audio', null, ['audio-tag']);
-            }
-            
-            // Extract favicons and icons
-            const icons = document.querySelectorAll('link[rel*="icon"]');
-            for (let icon of icons) {
-                if (icon.href) {
-                    addAsset(icon.href, 'icon', null, ['favicon']);
+                
+                // Extract fonts
+                const fontUrls = new Set();
+                for (let stylesheet of document.styleSheets) {
+                    try {
+                        for (let rule of stylesheet.cssRules) {
+                            if (rule.type === CSSRule.FONT_FACE_RULE) {
+                                const src = rule.style.src;
+                                if (src) {
+                                    const urlMatches = src.match(/url\\(["']?([^"')]+)["']?\\)/g);
+                                    if (urlMatches) {
+                                        urlMatches.forEach(match => {
+                                            const url = match.match(/url\\(["']?([^"')]+)["']?\\)/)[1];
+                                            addAsset(url, 'font', null, ['font-face']);
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Can't access cross-origin stylesheets
+                    }
                 }
+                
+                // Extract videos and audio
+                const videos = document.querySelectorAll('video[src], video source[src]');
+                for (let video of videos) {
+                    addAsset(video.src, 'video', null, ['video-tag']);
+                }
+                
+                const audios = document.querySelectorAll('audio[src], audio source[src]');
+                for (let audio of audios) {
+                    addAsset(audio.src, 'audio', null, ['audio-tag']);
+                }
+                
+                // Extract favicons and icons
+                const icons = document.querySelectorAll('link[rel*="icon"]');
+                for (let icon of icons) {
+                    if (icon.href) {
+                        addAsset(icon.href, 'icon', null, ['favicon']);
+                    }
+                }
+                
+                return {
+                    assets: assets,
+                    total_assets: assets.length
+                };
             }
             
-            return {
-                assets: assets,
-                total_assets: assets.length
-            };
-        }
-        
-        return extractAssets();
+            return extractAssets();
+        })()
         """
     
     def _get_layout_analyzer_script(self) -> str:
         """JavaScript for layout analysis."""
         return """
-        function analyzeLayout() {
-            const analysis = {
-                colorPalette: [],
-                fontFamilies: [],
-                responsiveBreakpoints: [],
-                layoutType: 'unknown'
-            };
-            
-            // Extract color palette
-            const colors = new Set();
-            const elements = document.querySelectorAll('*');
-            
-            for (let element of elements) {
-                try {
-                    const style = window.getComputedStyle(element);
-                    
-                    // Extract colors
-                    const color = style.color;
-                    const bgColor = style.backgroundColor;
-                    const borderColor = style.borderColor;
-                    
-                    [color, bgColor, borderColor].forEach(c => {
-                        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent' && c !== 'initial') {
-                            colors.add(c);
-                        }
-                    });
-                    
-                    // Extract font families
-                    const fontFamily = style.fontFamily;
-                    if (fontFamily && fontFamily !== 'initial') {
-                        analysis.fontFamilies.push(fontFamily.split(',')[0].replace(/['"]/g, '').trim());
-                    }
-                } catch (e) {
-                    // Skip elements that can't be accessed
-                }
-            }
-            
-            analysis.color_palette = Array.from(colors).slice(0, 20); // Limit to top 20 colors
-            analysis.font_families = [...new Set(analysis.fontFamilies)]; // Remove duplicates
-            
-            // Detect layout type
-            const bodyStyle = window.getComputedStyle(document.body);
-            if (bodyStyle.display === 'flex' || bodyStyle.display === 'grid') {
-                analysis.layout_type = bodyStyle.display;
-            } else {
-                // Check for common layout patterns
-                const flexElements = document.querySelectorAll('[style*="display: flex"], [style*="display:flex"]');
-                const gridElements = document.querySelectorAll('[style*="display: grid"], [style*="display:grid"]');
+        (() => {
+            function analyzeLayout() {
+                const analysis = {
+                    colorPalette: [],
+                    fontFamilies: [],
+                    responsiveBreakpoints: [],
+                    layoutType: 'unknown'
+                };
                 
-                if (gridElements.length > 0) {
-                    analysis.layout_type = 'grid';
-                } else if (flexElements.length > 0) {
-                    analysis.layout_type = 'flex';
-                } else {
-                    analysis.layout_type = 'traditional';
+                // Extract color palette
+                const colors = new Set();
+                const elements = document.querySelectorAll('*');
+                
+                for (let element of elements) {
+                    try {
+                        const style = window.getComputedStyle(element);
+                        
+                        // Extract colors
+                        const color = style.color;
+                        const bgColor = style.backgroundColor;
+                        const borderColor = style.borderColor;
+                        
+                        [color, bgColor, borderColor].forEach(c => {
+                            if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent' && c !== 'initial') {
+                                colors.add(c);
+                            }
+                        });
+                        
+                        // Extract font families
+                        const fontFamily = style.fontFamily;
+                        if (fontFamily && fontFamily !== 'initial') {
+                            analysis.fontFamilies.push(fontFamily.split(',')[0].replace(/['"]/g, '').trim());
+                        }
+                    } catch (e) {
+                        // Skip elements that can't be accessed
+                    }
                 }
-            }
-            
-            // Detect responsive breakpoints from media queries
-            const breakpoints = new Set();
-            for (let stylesheet of document.styleSheets) {
-                try {
-                    for (let rule of stylesheet.cssRules) {
-                        if (rule.type === CSSRule.MEDIA_RULE) {
-                            const mediaText = rule.media.mediaText;
-                            const widthMatches = mediaText.match(/\\((?:max-|min-)?width:\\s*(\\d+)px\\)/g);
-                            if (widthMatches) {
-                                widthMatches.forEach(match => {
-                                    const width = parseInt(match.match(/\\d+/)[0]);
-                                    if (width > 0) {
-                                        breakpoints.add(width);
-                                    }
-                                });
+                
+                analysis.color_palette = Array.from(colors).slice(0, 20); // Limit to top 20 colors
+                analysis.font_families = [...new Set(analysis.fontFamilies)]; // Remove duplicates
+                
+                // Detect layout type
+                const bodyStyle = window.getComputedStyle(document.body);
+                if (bodyStyle.display === 'flex' || bodyStyle.display === 'grid') {
+                    analysis.layout_type = bodyStyle.display;
+                } else {
+                    // Check for common layout patterns
+                    const flexElements = document.querySelectorAll('[style*="display: flex"], [style*="display:flex"]');
+                    const gridElements = document.querySelectorAll('[style*="display: grid"], [style*="display:grid"]');
+                    
+                    if (gridElements.length > 0) {
+                        analysis.layout_type = 'grid';
+                    } else if (flexElements.length > 0) {
+                        analysis.layout_type = 'flex';
+                    } else {
+                        analysis.layout_type = 'traditional';
+                    }
+                }
+                
+                // Detect responsive breakpoints from media queries
+                const breakpoints = new Set();
+                for (let stylesheet of document.styleSheets) {
+                    try {
+                        for (let rule of stylesheet.cssRules) {
+                            if (rule.type === CSSRule.MEDIA_RULE) {
+                                const mediaText = rule.media.mediaText;
+                                const widthMatches = mediaText.match(/\\((?:max-|min-)?width:\\s*(\\d+)px\\)/g);
+                                if (widthMatches) {
+                                    widthMatches.forEach(match => {
+                                        const width = parseInt(match.match(/\\d+/)[0]);
+                                        if (width > 0) {
+                                            breakpoints.add(width);
+                                        }
+                                    });
+                                }
                             }
                         }
+                    } catch (e) {
+                        // Can't access cross-origin stylesheets
                     }
-                } catch (e) {
-                    // Can't access cross-origin stylesheets
                 }
+                
+                analysis.responsive_breakpoints = Array.from(breakpoints).sort((a, b) => a - b);
+                
+                return analysis;
             }
             
-            analysis.responsive_breakpoints = Array.from(breakpoints).sort((a, b) => a - b);
-            
-            return analysis;
-        }
-        
-        return analyzeLayout();
+            return analyzeLayout();
+        })()
         """
     
     async def extract_dom_structure(
@@ -744,61 +752,63 @@ class DOMExtractionService:
         try:
             # Extract basic page metadata
             structure_script = """
-            function extractPageStructure() {
-                const structure = {
-                    title: document.title || null,
-                    lang: document.documentElement.lang || null,
-                    charset: document.characterSet || null,
-                    openGraph: {},
-                    schemaOrg: []
-                };
-                
-                // Extract meta tags
-                const metaTags = document.querySelectorAll('meta');
-                for (let meta of metaTags) {
-                    const name = meta.getAttribute('name') || meta.getAttribute('property');
-                    const content = meta.getAttribute('content');
+            (() => {
+                function extractPageStructure() {
+                    const structure = {
+                        title: document.title || null,
+                        lang: document.documentElement.lang || null,
+                        charset: document.characterSet || null,
+                        openGraph: {},
+                        schemaOrg: []
+                    };
                     
-                    if (name && content) {
-                        if (name === 'description') {
-                            structure.metaDescription = content;
-                        } else if (name === 'keywords') {
-                            structure.metaKeywords = content;
-                        } else if (name === 'viewport') {
-                            structure.viewport = content;
-                        } else if (name.startsWith('og:')) {
-                            structure.openGraph[name] = content;
+                    // Extract meta tags
+                    const metaTags = document.querySelectorAll('meta');
+                    for (let meta of metaTags) {
+                        const name = meta.getAttribute('name') || meta.getAttribute('property');
+                        const content = meta.getAttribute('content');
+                        
+                        if (name && content) {
+                            if (name === 'description') {
+                                structure.metaDescription = content;
+                            } else if (name === 'keywords') {
+                                structure.metaKeywords = content;
+                            } else if (name === 'viewport') {
+                                structure.viewport = content;
+                            } else if (name.startsWith('og:')) {
+                                structure.openGraph[name] = content;
+                            }
                         }
                     }
-                }
-                
-                // Extract favicon
-                const favicon = document.querySelector('link[rel*="icon"]');
-                if (favicon && favicon.href) {
-                    structure.faviconUrl = favicon.href;
-                }
-                
-                // Extract canonical URL
-                const canonical = document.querySelector('link[rel="canonical"]');
-                if (canonical && canonical.href) {
-                    structure.canonicalUrl = canonical.href;
-                }
-                
-                // Extract JSON-LD structured data
-                const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-                for (let script of scripts) {
-                    try {
-                        const data = JSON.parse(script.textContent);
-                        structure.schemaOrg.push(data);
-                    } catch (e) {
-                        // Invalid JSON, skip
+                    
+                    // Extract favicon
+                    const favicon = document.querySelector('link[rel*="icon"]');
+                    if (favicon && favicon.href) {
+                        structure.faviconUrl = favicon.href;
                     }
+                    
+                    // Extract canonical URL
+                    const canonical = document.querySelector('link[rel="canonical"]');
+                    if (canonical && canonical.href) {
+                        structure.canonicalUrl = canonical.href;
+                    }
+                    
+                    // Extract JSON-LD structured data
+                    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+                    for (let script of scripts) {
+                        try {
+                            const data = JSON.parse(script.textContent);
+                            structure.schemaOrg.push(data);
+                        } catch (e) {
+                            // Invalid JSON, skip
+                        }
+                    }
+                    
+                    return structure;
                 }
                 
-                return structure;
-            }
-            
-            return extractPageStructure();
+                return extractPageStructure();
+            })()
             """
             
             structure_data = await page.evaluate(structure_script)
