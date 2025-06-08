@@ -24,7 +24,8 @@ from ...models.dom_extraction import (
     DOMComplexityResponse,
     DOMExtractionInfoResponse,
     DOMExtractionSessionInfo,
-    DOMExtractionFileInfo
+    DOMExtractionFileInfo,
+    DOMRegenerationRequest
 )
 from ...core.exceptions import ValidationError, ProcessingError
 import logging
@@ -66,7 +67,12 @@ async def extract_dom_structure(
             include_computed_styles=request.include_computed_styles,
             max_depth=request.max_depth
         )
-        
+
+        if result.success:
+            from dataclasses import asdict
+            result_dict = asdict(result)
+        else:
+            result_dict = None
         # Save result if requested
         saved_file_path = None
         if request.save_result:
@@ -96,7 +102,7 @@ async def extract_dom_structure(
             success=result.success,
             message=f"Extracted {result.total_elements} elements successfully" if result.success 
                    else f"Extraction failed: {result.error_message}",
-            extraction_result=result,
+            extraction_result=result_dict,
             saved_file_path=saved_file_path,
             session_id=request.session_id,
             timestamp=datetime.now(UTC)
@@ -315,7 +321,7 @@ async def cleanup_old_extractions(
 
 @router.post("/session/{session_id}/regenerate", response_model=DOMExtractionResponse)
 async def regenerate_extraction(
-    extraction_request: DOMExtractionRequest,
+    extraction_request: DOMRegenerationRequest,
     session_id: str = Depends(validate_session_id),
     app_state: ApplicationState = Depends(get_app_state),
     browser_manager: BrowserManager = Depends(get_browser_manager),
@@ -373,7 +379,13 @@ async def regenerate_extraction(
             max_depth=new_request.max_depth
         )
         
+        if result.success:
+            from dataclasses import asdict
+            result_dict = asdict(result)
+        else:
+            result_dict = None
         # Save result if requested
+
         saved_file_path = None
         if new_request.save_result:
             saved_file_path = await extraction_service.save_extraction_result(
@@ -385,7 +397,7 @@ async def regenerate_extraction(
             success=result.success,
             message=f"Regenerated extraction with {result.total_elements} elements" if result.success
                    else f"Regeneration failed: {result.error_message}",
-            extraction_result=result,
+            extraction_result=result_dict,
             saved_file_path=saved_file_path,
             session_id=session_id,
             timestamp=datetime.now(UTC)

@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel, HttpUrl, Field, validator
+from pydantic import BaseModel, HttpUrl, Field, field_validator
 import re
 
 
@@ -41,7 +41,7 @@ class CloneWebsiteRequest(BaseModel):
         max_length=500
     )
     
-    @validator('url')
+    @field_validator('url')
     @classmethod
     def validate_url(cls, v):
         """Validate that the URL is accessible and not localhost."""
@@ -108,7 +108,7 @@ class WebSocketConnectionRequest(BaseModel):
         description="Event types to subscribe to"
     )
     
-    @validator('subscribe_to')
+    @field_validator('subscribe_to')
     @classmethod
     def validate_subscribe_to(cls, v):
         """Validate subscription event types."""

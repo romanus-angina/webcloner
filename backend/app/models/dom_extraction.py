@@ -15,7 +15,7 @@ class DOMExtractionRequest(BaseModel):
     url: HttpUrl = Field(
         ..., 
         description="The URL to extract DOM structure from",
-        example="https://example.com"
+        json_schema_extra={"example": "https://example.com"}
     )
     
     session_id: str = Field(

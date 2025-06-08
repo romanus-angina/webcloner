@@ -208,6 +208,12 @@ class BrowserService:
         """
         try:
             logger.info(f"Navigating to URL: {url}")
+
+            # Special handling for special URLs that don't return response objects
+            if url.startswith(("about:", "data:", "file:")):
+                await page.goto(url, wait_until="load")  # Use 'load' instead of 'networkidle'
+                logger.info(f"Successfully navigated to special URL: {url}")
+                return
             
             response = await page.goto(
                 url,

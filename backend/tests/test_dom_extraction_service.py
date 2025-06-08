@@ -738,8 +738,7 @@ async def test_dom_extraction_integration():
         
         service = DOMExtractionService(browser_manager)
         
-        # Test with a simple about:blank URL instead of data URL
-        test_url = "about:blank"
+        test_url = "data:text/html,<html><head><title>Test Page</title></head><body><h1>Test</h1><p>Content</p></body></html>"
         
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch('app.services.dom_extraction_service.settings') as mock_settings:
