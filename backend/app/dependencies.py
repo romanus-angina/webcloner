@@ -9,6 +9,7 @@ from datetime import datetime, UTC
 from .config import Settings, settings
 from .services.browser_manager import BrowserManager, browser_manager
 from .services.screenshot_service import ScreenshotService, screenshot_service
+from .services.dom_extraction_service import DOMExtractionService, dom_extraction_service
 
 # Global application state
 class ApplicationState:
@@ -288,6 +289,15 @@ def get_screenshot_service() -> ScreenshotService:
     """
     return screenshot_service
 
+def get_dom_extraction_service() -> DOMExtractionService:
+    """
+    Get the global DOM extraction service instance.
+    
+    Returns:
+        DOMExtractionService: Global DOM extraction service
+    """
+    return dom_extraction_service
+
 # Common dependency combinations
 CommonDeps = Depends(get_settings)
 StateDeps = Depends(get_app_state)
@@ -297,3 +307,4 @@ RateLimitDeps = Depends(check_rate_limit)
 BrowserManagerDeps = Depends(get_browser_manager)
 BrowserServiceDeps = Depends(get_browser_service)
 ScreenshotServiceDeps = Depends(get_screenshot_service)
+DOMExtractionServiceDeps = Depends(get_dom_extraction_service)

@@ -280,11 +280,12 @@ async def get_version():
 
 
 # Include routers
-from .api.routes import clone, health, screenshot
+from .api.routes import clone, health, screenshot, dom_extraction
 
 app.include_router(clone.router, prefix=settings.api_v1_prefix, tags=["Cloning"])
 app.include_router(health.router, prefix=settings.api_v1_prefix, tags=["Health Extended"])
 app.include_router(screenshot.router, prefix=settings.api_v1_prefix + "/screenshots", tags=["Screenshots"])
+app.include_router(dom_extraction.router, prefix=settings.api_v1_prefix + "/dom", tags=["DOM Extraction"])
 
 # WebSocket router will be added in the next phase
 # from .api.routes import websocket
