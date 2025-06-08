@@ -239,7 +239,8 @@ class TestBrowserService:
     async def test_get_browser_info_initialized(self, service):
         """Test browser info when initialized."""
         service._browser = AsyncMock()
-        service._browser.version = AsyncMock(return_value="1.40.0")
+        # Fix: Make version return a string value, not be an AsyncMock
+        service._browser.version = "1.40.0"  # Direct assignment, not a callable
         service._browser.is_connected = MagicMock(return_value=True)  # Use MagicMock for non-async
         service._contexts = [AsyncMock(), AsyncMock()]
         
@@ -249,7 +250,7 @@ class TestBrowserService:
         # Assertions
         assert info["status"] == "initialized"
         assert info["browser_type"] == settings.BROWSER_TYPE
-        assert info["version"] == "1.40.0"
+        assert info["version"] == "1.40.0"  # Now this will work
         assert info["contexts_count"] == 2
         assert info["is_connected"] is True
     

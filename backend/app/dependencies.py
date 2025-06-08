@@ -1,5 +1,5 @@
 from typing import Generator, Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from functools import lru_cache
 import time
 import uuid
@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, UTC
 
 from .config import Settings, settings
+from .services.browser_manager import BrowserManager, browser_manager
 
 
 # Global application state
@@ -64,6 +65,16 @@ def get_app_state() -> ApplicationState:
     return app_state
 
 
+def get_browser_manager() -> BrowserManager:
+    """
+    Get the global browser manager instance.
+    
+    Returns:
+        BrowserManager: Global browser manager
+    """
+    return browser_manager
+
+
 def get_logger(name: str = "website_cloner") -> logging.Logger:
     """
     Get a configured logger instance.
@@ -101,6 +112,21 @@ def generate_request_id() -> str:
 def get_request_id() -> str:
     """Dependency to get a unique request ID for each request."""
     return generate_request_id()
+
+
+async def add_request_context(request: Request) -> str:
+    """
+    Add request context to the request state.
+    
+    Args:
+        request: FastAPI request object
+        
+    Returns:
+        Request ID
+    """
+    request_id = generate_request_id()
+    request.state.request_id = request_id
+    return request_id
 
 
 async def validate_session_id(session_id: str) -> str:
@@ -179,18 +205,23 @@ class RateLimiter:
 rate_limiter = RateLimiter()
 
 
-async def check_rate_limit(request_key: str = None) -> None:
+async def check_rate_limit(request: Request = None, request_key: str = None) -> None:
     """
     Check rate limiting for the current request.
     
     Args:
-        request_key: Unique key for rate limiting (defaults to "global")
+        request: FastAPI request object (for extracting client IP)
+        request_key: Unique key for rate limiting (overrides IP-based key)
         
     Raises:
         HTTPException: If rate limit is exceeded
     """
+    # Determine rate limiting key
     if request_key is None:
-        request_key = "global"
+        if request and request.client:
+            request_key = request.client.host
+        else:
+            request_key = "global"
     
     settings = get_settings()
     
@@ -211,9 +242,49 @@ def increment_request_counter():
     return app_state.request_count
 
 
+# Browser-related dependencies
+async def get_browser_service():
+    """
+    Get an initialized browser service.
+    
+    Returns:
+        Initialized browser service from the manager
+        
+    Raises:
+        HTTPException: If browser service is not available
+    """
+    manager = get_browser_manager()
+    
+    if not manager._is_initialized:
+        try:
+            await manager.initialize()
+        except Exception as e:
+            logger = get_logger()
+            logger.error(f"Failed to initialize browser service: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Browser service unavailable"
+            )
+    
+    return manager._current_service
+
+
+async def get_browser_health():
+    """
+    Get browser service health status.
+    
+    Returns:
+        Dict containing health information
+    """
+    manager = get_browser_manager()
+    return await manager.health_check()
+
+
 # Common dependency combinations
 CommonDeps = Depends(get_settings)
 StateDeps = Depends(get_app_state)
 LoggerDeps = Depends(get_logger)
 RequestIdDeps = Depends(get_request_id)
 RateLimitDeps = Depends(check_rate_limit)
+BrowserManagerDeps = Depends(get_browser_manager)
+BrowserServiceDeps = Depends(get_browser_service)

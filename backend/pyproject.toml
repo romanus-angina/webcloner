@@ -22,6 +22,7 @@ dependencies = [
     "python-dateutil==2.8.2",
     "validators==0.22.0",
     "structlog==23.2.0",
+    "psutil==5.9.6",
 ]
 
 [project.optional-dependencies]
@@ -41,5 +42,6 @@ packages = ["app"]
 testpaths = ["tests"]
 markers = [
     "integration: integration tests",
+    "slow: slow-running tests",
 ]
 asyncio_mode = "auto"

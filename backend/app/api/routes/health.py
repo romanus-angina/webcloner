@@ -4,9 +4,15 @@ import psutil
 import os
 from datetime import datetime, UTC
 
-from ...dependencies import get_app_state, get_settings, ApplicationState
+from ...dependencies import (
+    get_app_state, 
+    get_settings, 
+    get_browser_manager,
+    ApplicationState
+)
 from ...models.responses import HealthResponse
 from ...config import Settings
+from ...services.browser_manager import BrowserManager
 
 router = APIRouter()
 
@@ -14,7 +20,8 @@ router = APIRouter()
 @router.get("/health/detailed", response_model=HealthResponse)
 async def detailed_health_check(
     app_state: ApplicationState = Depends(get_app_state),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    browser_manager: BrowserManager = Depends(get_browser_manager)
 ):
     """
     Detailed health check with system information.
@@ -23,6 +30,7 @@ async def detailed_health_check(
     - System metrics (CPU, memory, disk)
     - Application statistics
     - Service status
+    - Browser service health
     """
     uptime = app_state.get_uptime()
     
@@ -44,6 +52,10 @@ async def detailed_health_check(
     except Exception:
         system_info = {"error": "Unable to fetch system metrics"}
     
+    # Get browser service health
+    browser_health = await browser_manager.health_check()
+    browser_info = await browser_manager.get_service_info()
+    
     details = {
         "system": system_info,
         "application": {
@@ -55,8 +67,17 @@ async def detailed_health_check(
         },
         "services": {
             "anthropic_configured": bool(settings.anthropic_api_key),
-            "redis_configured": bool(settings.redis_url),
+            "redis_configured": bool(getattr(settings, 'redis_url', None)),
             "temp_storage_available": os.path.exists(settings.temp_storage_path)
+        },
+        "browser": {
+            "health": browser_health,
+            "service_info": browser_info,
+            "cloud_browser_configured": bool(
+                getattr(settings, 'BROWSERBASE_API_KEY', None) and 
+                getattr(settings, 'BROWSERBASE_PROJECT_ID', None)
+            ),
+            "cloud_browser_enabled": getattr(settings, 'USE_CLOUD_BROWSER', False)
         }
     }
     
@@ -73,6 +94,21 @@ async def detailed_health_check(
 async def quick_health_check():
     """Quick health check for load balancers."""
     return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
+
+
+@router.get("/health/browser")
+async def browser_health_check(
+    browser_manager: BrowserManager = Depends(get_browser_manager)
+):
+    """Get detailed browser service health information."""
+    health = await browser_manager.health_check()
+    info = await browser_manager.get_service_info()
+    
+    return {
+        "browser_health": health,
+        "browser_info": info,
+        "timestamp": datetime.now(UTC).isoformat()
+    }
 
 
 @router.get("/health/sessions")
@@ -159,7 +195,18 @@ async def config_health(
         "debug": settings.debug,
         "services_configured": {
             "anthropic": bool(settings.anthropic_api_key),
-            "redis": bool(settings.redis_url)
+            "redis": bool(getattr(settings, 'redis_url', None)),
+            "browserbase": bool(
+                getattr(settings, 'BROWSERBASE_API_KEY', None) and 
+                getattr(settings, 'BROWSERBASE_PROJECT_ID', None)
+            )
+        },
+        "browser_settings": {
+            "use_cloud_browser": getattr(settings, 'USE_CLOUD_BROWSER', False),
+            "browser_type": getattr(settings, 'BROWSER_TYPE', 'chromium'),
+            "headless": getattr(settings, 'BROWSER_HEADLESS', True),
+            "max_instances": getattr(settings, 'MAX_BROWSER_INSTANCES', 5),
+            "pool_size": getattr(settings, 'BROWSER_POOL_SIZE', 3)
         },
         "rate_limiting": {
             "enabled": True,
@@ -168,8 +215,42 @@ async def config_health(
         },
         "timeouts": {
             "request_timeout": settings.request_timeout,
-            "max_retries": settings.max_retries
+            "max_retries": settings.max_retries,
+            "browser_timeout": getattr(settings, 'BROWSER_TIMEOUT', 30),
+            "navigation_timeout": getattr(settings, 'BROWSER_NAVIGATION_TIMEOUT', 30)
         }
     }
     
     return config_status
+
+
+@router.post("/health/browser/restart")
+async def restart_browser_service(
+    browser_manager: BrowserManager = Depends(get_browser_manager)
+):
+    """
+    Restart the browser service (useful for recovery from errors).
+    This endpoint can be useful for debugging or recovering from browser issues.
+    """
+    try:
+        # Cleanup current service
+        await browser_manager.cleanup()
+        
+        # Reinitialize
+        await browser_manager.initialize()
+        
+        # Get new status
+        health = await browser_manager.health_check()
+        
+        return {
+            "status": "restarted",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "new_health": health
+        }
+        
+    except Exception as e:
+        return {
+            "status": "restart_failed",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "error": str(e)
+        }
