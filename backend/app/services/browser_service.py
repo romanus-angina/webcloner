@@ -268,7 +268,7 @@ class BrowserService:
             return {"status": "not_initialized"}
         
         try:
-            version = await self._browser.version()
+            version = self._browser.version
             return {
                 "status": "initialized",
                 "browser_type": settings.BROWSER_TYPE,
