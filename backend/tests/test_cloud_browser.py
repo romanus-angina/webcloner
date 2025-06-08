@@ -45,6 +45,38 @@ class TestCloudBrowserService:
             service._validate_configuration()
     
     @pytest.mark.asyncio
+    async def test_create_session_sends_user_agent(self, service):
+        """Test that session creation request includes a random user agent."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "test-session-ua",
+            "connectUrl": "wss://test-ua-connect-url"
+        }
+        
+        with patch.object(settings, 'BROWSERBASE_API_KEY', 'test-key'), \
+             patch.object(settings, 'BROWSERBASE_PROJECT_ID', 'test-project'), \
+             patch('httpx.AsyncClient') as mock_client:
+            
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+            
+            await service._create_session()
+
+            mock_post = mock_client.return_value.__aenter__.return_value.post
+            mock_post.assert_called_once()
+            
+            post_kwargs = mock_post.call_args.kwargs
+            assert "json" in post_kwargs
+            
+            payload = post_kwargs["json"]
+            assert "browserSettings" in payload
+            assert "fingerprint" in payload["browserSettings"]
+            assert "userAgent" in payload["browserSettings"]["fingerprint"]
+            
+            sent_user_agent = payload["browserSettings"]["fingerprint"]["userAgent"]
+            assert sent_user_agent in settings.USER_AGENTS
+            
+    @pytest.mark.asyncio
     async def test_create_session_success(self, service):
         """Test successful session creation."""
         # Fix: Mock response should include connectUrl like real Browserbase

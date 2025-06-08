@@ -14,6 +14,7 @@ from ..core.exceptions import (
     ConfigurationError
 )
 from ..utils.logger import get_logger
+from ..utils.browser import get_random_user_agent
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,10 @@ class CloudBrowserService:
             self._validate_configuration()
             
             logger.info("Creating new Browserbase session")
+
+            # Get a random user agent for the session
+            user_agent = get_random_user_agent(settings.USER_AGENTS)
+            logger.info(f"Using User-Agent for cloud session: {user_agent}")
             
             session_data = {
                 "projectId": settings.BROWSERBASE_PROJECT_ID,
@@ -73,7 +78,9 @@ class CloudBrowserService:
                         "screen": {
                             "width": getattr(settings, 'BROWSER_VIEWPORT_WIDTH', 1920),
                             "height": getattr(settings, 'BROWSER_VIEWPORT_HEIGHT', 1080)
-                        }
+                        },
+                        # Add the user agent to the fingerprint
+                        "userAgent": user_agent
                     }
                 }
             }

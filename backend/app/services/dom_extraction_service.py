@@ -1,5 +1,3 @@
-# backend/app/services/dom_extraction_service.py
-
 from typing import Dict, List, Optional, Any, Set, Tuple
 import asyncio
 import json

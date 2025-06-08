@@ -4,10 +4,12 @@ import logging
 from contextlib import asynccontextmanager
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from playwright_stealth import stealth_async
 
 from ..config import settings
 from ..core.exceptions import BrowserError, BrowserTimeoutError, BrowserConnectionError
 from ..utils.logger import get_logger
+from ..utils.browser import get_random_user_agent
 
 logger = get_logger(__name__)
 
@@ -73,6 +75,11 @@ class BrowserService:
         # Add timeout settings
         if hasattr(settings, 'BROWSER_TIMEOUT'):
             options["timeout"] = settings.BROWSER_TIMEOUT * 1000  # Convert to milliseconds
+        
+        # Add proxy support
+        if settings.PROXY_URL:
+            options["proxy"] = {"server": settings.PROXY_URL}
+            logger.info("Using proxy server for local browser session")
             
         return options
     
@@ -99,7 +106,8 @@ class BrowserService:
                     "width": getattr(settings, 'BROWSER_VIEWPORT_WIDTH', 1920),
                     "height": getattr(settings, 'BROWSER_VIEWPORT_HEIGHT', 1080)
                 },
-                "user_agent": getattr(settings, 'BROWSER_USER_AGENT', None),
+                # Use a random agent for sttealth
+                "user_agent": get_random_user_agent(settings.USER_AGENTS),
                 "java_script_enabled": True,
                 "accept_downloads": False,
                 "ignore_https_errors": True,
@@ -111,7 +119,7 @@ class BrowserService:
             context = await self._browser.new_context(**options)
             self._contexts.append(context)
             
-            logger.debug(f"Created new browser context (total: {len(self._contexts)})")
+            logger.debug(f"Created new browser context (total: {len(self._contexts)}) using user agent: {options['user_agent']}")
             return context
             
         except Exception as e:
@@ -141,6 +149,11 @@ class BrowserService:
             page.set_default_timeout(getattr(settings, 'BROWSER_TIMEOUT', 30) * 1000)
             page.set_default_navigation_timeout(getattr(settings, 'BROWSER_NAVIGATION_TIMEOUT', 30) * 1000)
             
+            # Apply playwright-stealth plugin
+            if settings.USE_STEALTH_PLUGIN:
+                await stealth_async(page)
+                logger.debug("Applied playwright-stealth to new page")
+
             logger.debug("Created new browser page")
             return page
             
