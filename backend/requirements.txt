@@ -1,0 +1,49 @@
+# backend/requirements.txt
+# Fallback requirements file for systems that don't support pyproject.toml
+# Generated from pyproject.toml - prefer using: pip install -e .
+
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Browser Automation
+playwright==1.40.0
+playwright-stealth==1.0.6
+
+# HTTP Clients
+httpx==0.25.2
+aiohttp==3.9.1
+requests==2.31.0
+
+# Async Support
+aiofiles==23.2.1
+
+# Image Processing
+Pillow==10.1.0
+
+# Web Scraping
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# Data Processing
+pandas==2.1.4
+numpy==1.26.2
+
+# Utilities
+python-dateutil==2.8.2
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+
+# Validation & Parsing
+validators==0.22.0
+python-magic==0.4.27
+
+# Caching & Storage
+redis==5.0.1
+diskcache==5.6.3
+
+# Logging & Monitoring
+structlog==23.2.0
+rich==13.7.0

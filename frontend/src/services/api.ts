@@ -50,7 +50,7 @@ class ApiClient {
       const response = await fetch(url, config);
       
       if (!response.ok) {
-        let errorData: ApiError;
+        let errorData: ApiErrorType;
         try {
           errorData = await response.json();
         } catch {
@@ -75,7 +75,6 @@ class ApiClient {
         throw error;
       }
       
-      // Network or other errors
       throw new ApiError(
         error instanceof Error ? error.message : 'Network error occurred',
         0,
@@ -107,4 +106,11 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
-export { type CloneRequest, type CloneResponse, type CloneStatus, type ProgressStep };
+
+export { 
+  type CloneRequest, 
+  type CloneResponse, 
+  type CloneStatus, 
+  type ProgressStep,
+  type HealthResponse
+};

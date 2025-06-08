@@ -176,3 +176,36 @@ def get_http_status_code(exception: WebsiteClonerException) -> int:
         HTTP status code
     """
     return EXCEPTION_STATUS_CODES.get(type(exception), 500)
+
+class BrowserError(Exception):
+    """Base exception for browser automation errors."""
+    
+    def __init__(self, message: str, details: dict = None):
+        self.message = message
+        self.details = details or {}
+        super().__init__(self.message)
+
+
+class BrowserConnectionError(BrowserError):
+    """Exception raised when browser connection fails."""
+    pass
+
+
+class BrowserTimeoutError(BrowserError):
+    """Exception raised when browser operations timeout."""
+    pass
+
+
+class BrowserNavigationError(BrowserError):
+    """Exception raised when page navigation fails."""
+    pass
+
+
+class BrowserContentError(BrowserError):
+    """Exception raised when content extraction fails."""
+    pass
+
+
+class BrowserConfigurationError(BrowserError):
+    """Exception raised when browser configuration is invalid."""
+    pass
