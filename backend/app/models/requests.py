@@ -10,12 +10,12 @@ class CloneWebsiteRequest(BaseModel):
         ..., 
         description="The URL of the website to clone",
         example="https://example.com"
-    
+    )
     
     quality: str = Field(
         default="balanced",
         description="Quality level for cloning (fast, balanced, high)",
-        regex="^(fast|balanced|high)$"
+        pattern="^(fast|balanced|high)$"
     )
     
     include_images: bool = Field(

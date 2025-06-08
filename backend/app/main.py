@@ -21,6 +21,7 @@ from .core.exceptions import (
 )
 from .models.responses import ErrorResponse, HealthResponse
 from .utils.logger import setup_logging, get_logger
+from .dependencies import get_browser_manager
 
 # Initialize logging
 setup_logging()
@@ -38,13 +39,26 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Debug mode: {settings.debug}")
     
-    # Initialize services here (database connections, etc.)
-    # For now, we'll just log the startup
+    # Initialize browser manager
+    try:
+        browser_manager = get_browser_manager()
+        await browser_manager.initialize()
+        logger.info("Browser manager initialized successfully")
+    except Exception as e:
+        logger.warning(f"Browser manager initialization failed: {str(e)}")
+        logger.info("Browser will be initialized on first use")
     
     yield
     
     # Shutdown
     logger.info("Shutting down application")
+    try:
+        browser_manager = get_browser_manager()
+        await browser_manager.cleanup()
+        logger.info("Browser manager cleaned up")
+    except Exception as e:
+        logger.warning(f"Browser cleanup error: {str(e)}")
+
 
 
 # Create FastAPI application
