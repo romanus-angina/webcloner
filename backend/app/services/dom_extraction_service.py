@@ -150,264 +150,59 @@ class DOMExtractionService:
         """JavaScript for DOM structure extraction."""
         return """
         (() => {
-            function extractDOMStructure() {
+            function extractAllElements() {
                 const elements = [];
-                
-                function getXPath(element) {
-                    if (element.id) {
-                        return `//*[@id="${element.id}"]`;
-                    }
-                    
-                    let path = '';
-                    let current = element;
-                    
-                    while (current && current.nodeType === Node.ELEMENT_NODE) {
-                        let selector = current.nodeName.toLowerCase();
-                        if (current.className && typeof current.className === 'string') {
-                            const classes = current.className.trim().split(/\\s+/);
-                            if (classes.length > 0 && classes[0]) {
-                                selector += '.' + classes[0];
-                            }
-                        }
-                        
-                        let index = 1;
-                        let sibling = current.previousElementSibling;
-                        while (sibling) {
-                            if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
-                                index++;
-                            }
-                            sibling = sibling.previousElementSibling;
-                        }
-                        
-                        if (index > 1) {
-                            selector += `[${index}]`;
-                        }
-                        
-                        path = '/' + selector + path;
-                        current = current.parentElement;
-                    }
-                    
-                    return path;
-                }
-                
-                function getBoundingBox(element) {
-                    try {
-                        const rect = element.getBoundingClientRect();
-                        return {
-                            x: rect.x,
-                            y: rect.y,
-                            width: rect.width,
-                            height: rect.height,
-                            top: rect.top,
-                            right: rect.right,
-                            bottom: rect.bottom,
-                            left: rect.left
-                        };
-                    } catch (e) {
-                        return null;
-                    }
-                }
-                
-                function isElementVisible(element) {
+                const allNodes = document.querySelectorAll('body, body *');
+
+                for (const element of allNodes) {
                     try {
                         const style = window.getComputedStyle(element);
-                        const rect = element.getBoundingClientRect();
-                        
-                        return style.display !== 'none' &&
-                            style.visibility !== 'hidden' &&
-                            style.opacity !== '0' &&
-                            rect.width > 0 &&
-                            rect.height > 0;
-                    } catch (e) {
-                        return true;
-                    }
-                }
-                
-                function extractElement(element, maxDepth = 10, currentDepth = 0) {
-                    if (currentDepth > maxDepth) return null;
-                    
-                    try {
-                        const computedStyle = window.getComputedStyle(element);
                         const attributes = {};
-                        
-                        // Get important attributes
-                        for (let attr of element.attributes) {
-                            if (['href', 'src', 'alt', 'title', 'data-*', 'aria-*'].some(pattern => 
-                                pattern.includes('*') ? attr.name.startsWith(pattern.replace('*', '')) : attr.name === pattern)) {
-                                attributes[attr.name] = attr.value;
-                            }
+                        for (const attr of element.attributes) {
+                            attributes[attr.name] = attr.value;
                         }
-                        
-                        // Get key computed styles
-                        const importantStyles = [
-                            'display', 'position', 'float', 'clear',
-                            'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
-                            'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
-                            'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-                            'border', 'border-width', 'border-style', 'border-color', 'border-radius',
-                            'background', 'background-color', 'background-image', 'background-size', 'background-position',
-                            'color', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height',
-                            'text-align', 'text-decoration', 'text-transform',
-                            'z-index', 'opacity', 'visibility', 'overflow', 'overflow-x', 'overflow-y',
-                            'flex', 'flex-direction', 'justify-content', 'align-items', 'flex-wrap',
-                            'grid', 'grid-template-columns', 'grid-template-rows', 'grid-gap'
-                        ];
-                        
-                        const styles = {};
-                        importantStyles.forEach(prop => {
-                            const value = computedStyle.getPropertyValue(prop);
-                            if (value && value !== 'auto' && value !== 'none' && value !== 'normal' && value !== 'initial') {
-                                styles[prop] = value;
-                            }
-                        });
-                        
+
+                        // Get direct text content, ignoring child element text
+                        const textContent = Array.from(element.childNodes)
+                            .filter(node => node.nodeType === Node.TEXT_NODE)
+                            .map(node => node.textContent)
+                            .join(' ')
+                            .trim();
+
                         const elementData = {
                             tag_name: element.tagName.toLowerCase(),
                             element_id: element.id || null,
-                            class_names: element.className ? element.className.trim().split(/\\s+/).filter(Boolean) : [],
-                            computed_styles: styles,
+                            class_names: element.className && typeof element.className === 'string' 
+                                ? element.className.trim().split(/\\s+/).filter(Boolean) 
+                                : [],
+                            computed_styles: { // Focus on styles critical for layout/component detection
+                                display: style.getPropertyValue('display'),
+                                'box-shadow': style.getPropertyValue('box-shadow'),
+                                border: style.getPropertyValue('border'),
+                                padding: style.getPropertyValue('padding')
+                            },
                             attributes: attributes,
-                            text_content: element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE
-                                ? element.textContent.trim() : null,
+                            text_content: textContent || null,
                             children_count: element.children.length,
-                            xpath: getXPath(element),
-                            bounding_box: getBoundingBox(element),
-                            is_visible: isElementVisible(element),
-                            z_index: computedStyle.zIndex !== 'auto' ? parseInt(computedStyle.zIndex) || null : null
+                            xpath: null, // De-prioritize complex XPath for stability
+                            bounding_box: null,
+                            is_visible: true,
+                            z_index: 0
                         };
-                        
-                        return elementData;
+                        elements.push(elementData);
                     } catch (e) {
-                        console.warn('Error extracting element:', e);
-                        return null;
+                        // If one element fails, we log it but don't stop the process.
+                        console.error('Could not process element:', element, e.message);
                     }
                 }
-                
-                // Extract all visible elements
-                const allElements = document.querySelectorAll('*');
-                
-                for (let element of allElements) {
-                    if (element.tagName && !['SCRIPT', 'STYLE', 'META', 'LINK', 'TITLE'].includes(element.tagName)) {
-                        const extracted = extractElement(element);
-                        if (extracted) {
-                            elements.push(extracted);
-                        }
-                    }
-                }
-                
+
                 return {
                     elements: elements,
-                    dom_depth: Math.max(...elements.map(el => (el.xpath || '').split('/').length - 1)),
-                    total_elements: elements.length
+                    total_elements: elements.length,
+                    dom_depth: 0 // Not critical for component detection
                 };
             }
-
-            return extractDOMStructure();
-        })()
-        """
-    
-    def _get_style_extractor_script(self) -> str:
-        """JavaScript for stylesheet extraction."""
-        return """
-        (() => {
-            function extractStylesheets() {
-                const stylesheets = [];
-                
-                // Extract external stylesheets
-                const linkElements = document.querySelectorAll('link[rel="stylesheet"]');
-                for (let link of linkElements) {
-                    try {
-                        const stylesheet = {
-                            href: link.href,
-                            media: link.media || 'all',
-                            inline: false,
-                            rules: []
-                        };
-                        
-                        // Try to access rules if same-origin
-                        try {
-                            if (link.sheet && link.sheet.cssRules) {
-                                for (let rule of link.sheet.cssRules) {
-                                    if (rule.type === CSSRule.STYLE_RULE) {
-                                        stylesheet.rules.push({
-                                            selector: rule.selectorText,
-                                            styles: rule.style.cssText,
-                                            specificity: calculateSpecificity(rule.selectorText)
-                                        });
-                                    }
-                                }
-                            }
-                        } catch (e) {
-                            // Cross-origin stylesheet, can't access rules
-                            console.warn('Cannot access stylesheet rules (CORS):', link.href);
-                        }
-                        
-                        stylesheets.push(stylesheet);
-                    } catch (e) {
-                        console.warn('Error processing stylesheet:', e);
-                    }
-                }
-                
-                // Extract inline styles
-                const styleElements = document.querySelectorAll('style');
-                for (let style of styleElements) {
-                    try {
-                        const stylesheet = {
-                            href: null,
-                            media: style.media || 'all',
-                            inline: true,
-                            content: style.textContent,
-                            rules: []
-                        };
-                        
-                        if (style.sheet && style.sheet.cssRules) {
-                            for (let rule of style.sheet.cssRules) {
-                                if (rule.type === CSSRule.STYLE_RULE) {
-                                    stylesheet.rules.push({
-                                        selector: rule.selectorText,
-                                        styles: rule.style.cssText,
-                                        specificity: calculateSpecificity(rule.selectorText)
-                                    });
-                                }
-                            }
-                        }
-                        
-                        stylesheets.push(stylesheet);
-                    } catch (e) {
-                        console.warn('Error processing inline stylesheet:', e);
-                    }
-                }
-                
-                function calculateSpecificity(selector) {
-                    if (!selector) return 0;
-                    
-                    let specificity = 0;
-                    
-                    // Count IDs
-                    const ids = (selector.match(/#[a-zA-Z0-9_-]+/g) || []).length;
-                    specificity += ids * 100;
-                    
-                    // Count classes, attributes, and pseudo-classes
-                    const classes = (selector.match(/\\.[a-zA-Z0-9_-]+/g) || []).length;
-                    const attributes = (selector.match(/\\[[^\\]]+\\]/g) || []).length;
-                    const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+/g) || []).length;
-                    specificity += (classes + attributes + pseudoClasses) * 10;
-                    
-                    // Count elements and pseudo-elements
-                    const elements = (selector.match(/^[a-zA-Z0-9]+|\\s[a-zA-Z0-9]+/g) || []).length;
-                    const pseudoElements = (selector.match(/::[a-zA-Z0-9_-]+/g) || []).length;
-                    specificity += elements + pseudoElements;
-                    
-                    return specificity;
-                }
-                
-                return {
-                    stylesheets: stylesheets,
-                    total_stylesheets: stylesheets.length
-                };
-            }
-            
-            return extractStylesheets();
+            return extractAllElements();
         })()
         """
     
@@ -523,6 +318,111 @@ class DOMExtractionService:
             }
             
             return extractAssets();
+        })()
+        """
+
+    def _get_style_extractor_script(self) -> str:
+        """JavaScript for stylesheet extraction."""
+        return """
+        (() => {
+            function extractStylesheets() {
+                const stylesheets = [];
+                
+                // Extract external stylesheets
+                const linkElements = document.querySelectorAll('link[rel="stylesheet"]');
+                for (let link of linkElements) {
+                    try {
+                        const stylesheet = {
+                            href: link.href,
+                            media: link.media || 'all',
+                            inline: false,
+                            rules: []
+                        };
+                        
+                        // Try to access rules if same-origin
+                        try {
+                            if (link.sheet && link.sheet.cssRules) {
+                                for (let rule of link.sheet.cssRules) {
+                                    if (rule.type === CSSRule.STYLE_RULE) {
+                                        stylesheet.rules.push({
+                                            selector: rule.selectorText,
+                                            styles: rule.style.cssText,
+                                            specificity: calculateSpecificity(rule.selectorText)
+                                        });
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin stylesheet, can't access rules
+                            console.warn('Cannot access stylesheet rules (CORS):', link.href);
+                        }
+                        
+                        stylesheets.push(stylesheet);
+                    } catch (e) {
+                        console.warn('Error processing stylesheet:', e);
+                    }
+                }
+                
+                // Extract inline styles
+                const styleElements = document.querySelectorAll('style');
+                for (let style of styleElements) {
+                    try {
+                        const stylesheet = {
+                            href: null,
+                            media: style.media || 'all',
+                            inline: true,
+                            content: style.textContent,
+                            rules: []
+                        };
+                        
+                        if (style.sheet && style.sheet.cssRules) {
+                            for (let rule of style.sheet.cssRules) {
+                                if (rule.type === CSSRule.STYLE_RULE) {
+                                    stylesheet.rules.push({
+                                        selector: rule.selectorText,
+                                        styles: rule.style.cssText,
+                                        specificity: calculateSpecificity(rule.selectorText)
+                                    });
+                                }
+                            }
+                        }
+                        
+                        stylesheets.push(stylesheet);
+                    } catch (e) {
+                        console.warn('Error processing inline stylesheet:', e);
+                    }
+                }
+                
+                function calculateSpecificity(selector) {
+                    if (!selector) return 0;
+                    
+                    let specificity = 0;
+                    
+                    // Count IDs
+                    const ids = (selector.match(/#[a-zA-Z0-9_-]+/g) || []).length;
+                    specificity += ids * 100;
+                    
+                    // Count classes, attributes, and pseudo-classes
+                    const classes = (selector.match(/\\.[a-zA-Z0-9_-]+/g) || []).length;
+                    const attributes = (selector.match(/\\[[^\\]]+\\]/g) || []).length;
+                    const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+/g) || []).length;
+                    specificity += (classes + attributes + pseudoClasses) * 10;
+                    
+                    // Count elements and pseudo-elements
+                    const elements = (selector.match(/^[a-zA-Z0-9]+|\\s[a-zA-Z0-9]+/g) || []).length;
+                    const pseudoElements = (selector.match(/::[a-zA-Z0-9_-]+/g) || []).length;
+                    specificity += elements + pseudoElements;
+                    
+                    return specificity;
+                }
+                
+                return {
+                    stylesheets: stylesheets,
+                    total_stylesheets: stylesheets.length
+                };
+            }
+            
+            return extractStylesheets();
         })()
         """
     
