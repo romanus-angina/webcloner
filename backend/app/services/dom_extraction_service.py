@@ -147,25 +147,71 @@ class DOMExtractionService:
         }
 
     def _get_dom_extractor_script(self) -> str:
-        """Clean DOM extraction script for production use."""
+        """Enhanced DOM extraction script that waits for dynamic content."""
         return """
         (() => {
-            function extractAllElements() {
+            // Wait for dynamic content to load
+            function waitForDynamicContent() {
+                return new Promise((resolve) => {
+                    let attempts = 0;
+                    const maxAttempts = 50; // 10 seconds max wait
+                    
+                    function checkContent() {
+                        attempts++;
+                        
+                        // Check if page seems fully loaded
+                        const hasImages = document.querySelectorAll('img[src]').length > 0;
+                        const hasText = document.body.innerText.trim().length > 100;
+                        const noLoadingIndicators = document.querySelectorAll('[class*="loading"], [class*="spinner"], [id*="loading"]').length === 0;
+                        
+                        if ((hasImages || hasText) && noLoadingIndicators) {
+                            resolve(true);
+                        } else if (attempts >= maxAttempts) {
+                            resolve(false); // Timeout
+                        } else {
+                            setTimeout(checkContent, 200);
+                        }
+                    }
+                    
+                    checkContent();
+                });
+            }
+            
+            async function extractWithWait() {
+                // Wait for dynamic content
+                await waitForDynamicContent();
+                
+                // Additional wait for any remaining animations/renders
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
                 const elements = [];
                 const allNodes = document.querySelectorAll('*');
-
+                
                 for (let i = 0; i < allNodes.length; i++) {
                     const element = allNodes[i];
                     
                     try {
                         const tagName = element.tagName.toLowerCase();
                         
-                        // Skip only script and style tags
+                        // Skip script and style tags
                         if (tagName === 'script' || tagName === 'style') {
                             continue;
                         }
                         
-                        // Extract attributes safely
+                        // Get bounding box for layout analysis
+                        const rect = element.getBoundingClientRect();
+                        const bounding_box = rect.width > 0 && rect.height > 0 ? {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height,
+                            top: rect.top,
+                            right: rect.right,
+                            bottom: rect.bottom,
+                            left: rect.left
+                        } : null;
+                        
+                        // Enhanced attribute extraction
                         const attributes = {};
                         if (element.attributes) {
                             for (let j = 0; j < element.attributes.length; j++) {
@@ -176,7 +222,7 @@ class DOMExtractionService:
                             }
                         }
                         
-                        // Extract text content (direct text only, not nested)
+                        // Better text content extraction
                         let textContent = '';
                         if (element.childNodes) {
                             for (let k = 0; k < element.childNodes.length; k++) {
@@ -188,36 +234,73 @@ class DOMExtractionService:
                         }
                         textContent = textContent.trim();
                         
-                        // Extract classes
+                        // Enhanced class extraction
                         const classNames = [];
                         if (element.className && typeof element.className === 'string') {
                             const classes = element.className.trim();
                             if (classes) {
-                                classNames.push(...classes.split(/\\s+/).filter(cls => cls.length > 0));
+                                classNames.push(...classes.split(/\s+/).filter(cls => cls.length > 0));
                             }
                         }
                         
-                        // Get computed styles
-                        const computedStyles = {
-                            'display': 'block',
-                            'box-shadow': 'none',
-                            'border': 'none',
-                            'padding': '0px'
-                        };
-                        
+                        // Comprehensive computed styles
+                        const computedStyles = {};
                         try {
                             const style = window.getComputedStyle(element);
                             if (style) {
-                                computedStyles['display'] = style.display || 'block';
-                                computedStyles['box-shadow'] = style.boxShadow || 'none';
-                                computedStyles['border'] = style.border || 'none';
-                                computedStyles['padding'] = style.padding || '0px';
+                                // Critical layout properties
+                                const criticalProps = [
+                                    'display', 'position', 'top', 'right', 'bottom', 'left',
+                                    'width', 'height', 'margin', 'padding', 'border',
+                                    'background', 'background-color', 'background-image',
+                                    'color', 'font-family', 'font-size', 'font-weight',
+                                    'text-align', 'text-decoration', 'line-height',
+                                    'flex', 'flex-direction', 'justify-content', 'align-items',
+                                    'grid', 'grid-template-columns', 'grid-template-rows',
+                                    'box-shadow', 'border-radius', 'opacity', 'z-index',
+                                    'overflow', 'white-space', 'word-wrap'
+                                ];
+                                
+                                criticalProps.forEach(prop => {
+                                    const value = style.getPropertyValue(prop);
+                                    if (value && value !== 'initial' && value !== 'normal') {
+                                        computedStyles[prop] = value;
+                                    }
+                                });
                             }
                         } catch (e) {
-                            // Use defaults if getComputedStyle fails
+                            // Fallback styles
+                            computedStyles['display'] = 'block';
                         }
-
-                        // Create element data
+                        
+                        // Generate XPath for better element identification
+                        function getXPath(element) {
+                            if (element.id) {
+                                return `//*[@id="${element.id}"]`;
+                            }
+                            
+                            const parts = [];
+                            let current = element;
+                            
+                            while (current && current.nodeType === Node.ELEMENT_NODE) {
+                                let part = current.tagName.toLowerCase();
+                                
+                                if (current.className) {
+                                    const classes = current.className.trim().split(/\s+/);
+                                    if (classes.length > 0) {
+                                        part += `[@class="${current.className}"]`;
+                                    }
+                                }
+                                
+                                parts.unshift(part);
+                                current = current.parentNode;
+                                
+                                if (parts.length > 10) break; // Prevent overly long XPaths
+                            }
+                            
+                            return '/' + parts.join('/');
+                        }
+                        
                         const elementData = {
                             tag_name: tagName,
                             element_id: element.id || null,
@@ -226,16 +309,18 @@ class DOMExtractionService:
                             attributes: attributes,
                             text_content: textContent || null,
                             children_count: element.children ? element.children.length : 0,
-                            xpath: null,
-                            bounding_box: null,
-                            is_visible: true,
-                            z_index: 0
+                            xpath: getXPath(element),
+                            bounding_box: bounding_box,
+                            is_visible: rect.width > 0 && rect.height > 0 && 
+                                    style.display !== 'none' && 
+                                    style.visibility !== 'hidden',
+                            z_index: computedStyles['z-index'] ? parseInt(computedStyles['z-index']) || 0 : 0
                         };
                         
                         elements.push(elementData);
                         
                     } catch (e) {
-                        // Skip elements that can't be processed
+                        console.warn('Error processing element:', e);
                         continue;
                     }
                 }
@@ -243,13 +328,14 @@ class DOMExtractionService:
                 return {
                     elements: elements,
                     total_elements: elements.length,
-                    dom_depth: 0
+                    dom_depth: Math.max(...elements.map(e => (e.xpath?.split('/').length || 0))) - 1,
+                    page_fully_loaded: true
                 };
             }
             
-            return extractAllElements();
+            return extractWithWait();
         })()
-        """        
+        """
     
     def _get_asset_extractor_script(self) -> str:
         """JavaScript for asset discovery - FIXED version."""
@@ -382,13 +468,13 @@ class DOMExtractionService:
         """
 
     def _get_style_extractor_script(self) -> str:
-        """JavaScript for stylesheet extraction."""
+        """Enhanced stylesheet extraction that captures more CSS rules."""
         return """
         (() => {
-            function extractStylesheets() {
+            function extractEnhancedStylesheets() {
                 const stylesheets = [];
                 
-                // Extract external stylesheets
+                // Extract external stylesheets with better rule access
                 const linkElements = document.querySelectorAll('link[rel="stylesheet"]');
                 for (let link of linkElements) {
                     try {
@@ -396,10 +482,11 @@ class DOMExtractionService:
                             href: link.href,
                             media: link.media || 'all',
                             inline: false,
-                            rules: []
+                            rules: [],
+                            content: null
                         };
                         
-                        // Try to access rules if same-origin
+                        // Try to access CSS rules
                         try {
                             if (link.sheet && link.sheet.cssRules) {
                                 for (let rule of link.sheet.cssRules) {
@@ -409,21 +496,41 @@ class DOMExtractionService:
                                             styles: rule.style.cssText,
                                             specificity: calculateSpecificity(rule.selectorText)
                                         });
+                                    } else if (rule.type === CSSRule.MEDIA_RULE) {
+                                        // Extract media query rules
+                                        stylesheet.rules.push({
+                                            selector: `@media ${rule.media.mediaText}`,
+                                            styles: Array.from(rule.cssRules).map(r => r.cssText).join('\\n'),
+                                            specificity: 0,
+                                            media: rule.media.mediaText
+                                        });
+                                    } else if (rule.type === CSSRule.KEYFRAMES_RULE) {
+                                        // Extract keyframe animations
+                                        stylesheet.rules.push({
+                                            selector: `@keyframes ${rule.name}`,
+                                            styles: rule.cssText,
+                                            specificity: 0,
+                                            animation: rule.name
+                                        });
                                     }
                                 }
                             }
                         } catch (e) {
-                            // Cross-origin stylesheet, can't access rules
-                            console.warn('Cannot access stylesheet rules (CORS):', link.href);
+                            // For CORS-blocked stylesheets, still record them
+                            stylesheet.rules.push({
+                                selector: '/* External stylesheet - CORS blocked */',
+                                styles: `/* ${link.href} */`,
+                                specificity: 0
+                            });
                         }
                         
                         stylesheets.push(stylesheet);
                     } catch (e) {
-                        console.warn('Error processing stylesheet:', e);
+                        console.warn('Error processing external stylesheet:', e);
                     }
                 }
                 
-                // Extract inline styles
+                // Extract inline styles with enhanced processing
                 const styleElements = document.querySelectorAll('style');
                 for (let style of styleElements) {
                     try {
@@ -437,12 +544,24 @@ class DOMExtractionService:
                         
                         if (style.sheet && style.sheet.cssRules) {
                             for (let rule of style.sheet.cssRules) {
-                                if (rule.type === CSSRule.STYLE_RULE) {
-                                    stylesheet.rules.push({
-                                        selector: rule.selectorText,
-                                        styles: rule.style.cssText,
-                                        specificity: calculateSpecificity(rule.selectorText)
-                                    });
+                                try {
+                                    if (rule.type === CSSRule.STYLE_RULE) {
+                                        stylesheet.rules.push({
+                                            selector: rule.selectorText,
+                                            styles: rule.style.cssText,
+                                            specificity: calculateSpecificity(rule.selectorText)
+                                        });
+                                    } else if (rule.type === CSSRule.MEDIA_RULE) {
+                                        stylesheet.rules.push({
+                                            selector: `@media ${rule.media.mediaText}`,
+                                            styles: Array.from(rule.cssRules).map(r => r.cssText).join('\\n'),
+                                            specificity: 0,
+                                            media: rule.media.mediaText
+                                        });
+                                    }
+                                } catch (e) {
+                                    // Skip invalid rules
+                                    continue;
                                 }
                             }
                         }
@@ -453,6 +572,7 @@ class DOMExtractionService:
                     }
                 }
                 
+                // Enhanced specificity calculation
                 function calculateSpecificity(selector) {
                     if (!selector) return 0;
                     
@@ -465,7 +585,7 @@ class DOMExtractionService:
                     // Count classes, attributes, and pseudo-classes
                     const classes = (selector.match(/\\.[a-zA-Z0-9_-]+/g) || []).length;
                     const attributes = (selector.match(/\\[[^\\]]+\\]/g) || []).length;
-                    const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+/g) || []).length;
+                    const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+(?:\\([^)]*\\))?/g) || []).length;
                     specificity += (classes + attributes + pseudoClasses) * 10;
                     
                     // Count elements and pseudo-elements
@@ -478,27 +598,32 @@ class DOMExtractionService:
                 
                 return {
                     stylesheets: stylesheets,
-                    total_stylesheets: stylesheets.length
+                    total_stylesheets: stylesheets.length,
+                    total_rules: stylesheets.reduce((sum, sheet) => sum + sheet.rules.length, 0)
                 };
             }
             
-            return extractStylesheets();
+            return extractEnhancedStylesheets();
         })()
         """
     
     def _get_layout_analyzer_script(self) -> str:
-        """JavaScript for layout analysis."""
+        """Enhanced JavaScript for layout analysis."""
         return """
         (() => {
-            function analyzeLayout() {
+            function analyzeEnhancedLayout() {
                 const analysis = {
-                    colorPalette: [],
-                    fontFamilies: [],
-                    responsiveBreakpoints: [],
-                    layoutType: 'unknown'
+                    color_palette: [],
+                    font_families: [],
+                    responsive_breakpoints: [],
+                    layout_type: 'unknown',
+                    grid_systems: [],
+                    flexbox_usage: 0,
+                    css_frameworks: [],
+                    spacing_patterns: []
                 };
                 
-                // Extract color palette
+                // Extract comprehensive color palette
                 const colors = new Set();
                 const elements = document.querySelectorAll('*');
                 
@@ -506,80 +631,202 @@ class DOMExtractionService:
                     try {
                         const style = window.getComputedStyle(element);
                         
-                        // Extract colors
-                        const color = style.color;
-                        const bgColor = style.backgroundColor;
-                        const borderColor = style.borderColor;
+                        // Extract all color properties
+                        const colorProps = [
+                            'color', 'background-color', 'border-color', 
+                            'border-top-color', 'border-right-color', 
+                            'border-bottom-color', 'border-left-color',
+                            'box-shadow', 'text-shadow', 'outline-color'
+                        ];
                         
-                        [color, bgColor, borderColor].forEach(c => {
-                            if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent' && c !== 'initial') {
-                                colors.add(c);
+                        colorProps.forEach(prop => {
+                            const value = style.getPropertyValue(prop);
+                            if (value && value !== 'rgba(0, 0, 0, 0)' && 
+                                value !== 'transparent' && value !== 'initial' && 
+                                value !== 'inherit' && value !== 'none') {
+                                
+                                // Extract colors from box-shadow and text-shadow
+                                if (prop.includes('shadow') && value !== 'none') {
+                                    const shadowColors = value.match(/rgba?\\([^)]+\\)|#[a-fA-F0-9]{3,6}|[a-zA-Z]+/g);
+                                    if (shadowColors) {
+                                        shadowColors.forEach(color => colors.add(color));
+                                    }
+                                } else {
+                                    colors.add(value);
+                                }
                             }
                         });
                         
                         // Extract font families
-                        const fontFamily = style.fontFamily;
-                        if (fontFamily && fontFamily !== 'initial') {
-                            analysis.fontFamilies.push(fontFamily.split(',')[0].replace(/['"]/g, '').trim());
-                        }
-                    } catch (e) {
-                        // Skip elements that can't be accessed
-                    }
-                }
-                
-                analysis.color_palette = Array.from(colors).slice(0, 20); // Limit to top 20 colors
-                analysis.font_families = [...new Set(analysis.fontFamilies)]; // Remove duplicates
-                
-                // Detect layout type
-                const bodyStyle = window.getComputedStyle(document.body);
-                if (bodyStyle.display === 'flex' || bodyStyle.display === 'grid') {
-                    analysis.layout_type = bodyStyle.display;
-                } else {
-                    // Check for common layout patterns
-                    const flexElements = document.querySelectorAll('[style*="display: flex"], [style*="display:flex"]');
-                    const gridElements = document.querySelectorAll('[style*="display: grid"], [style*="display:grid"]');
-                    
-                    if (gridElements.length > 0) {
-                        analysis.layout_type = 'grid';
-                    } else if (flexElements.length > 0) {
-                        analysis.layout_type = 'flex';
-                    } else {
-                        analysis.layout_type = 'traditional';
-                    }
-                }
-                
-                // Detect responsive breakpoints from media queries
-                const breakpoints = new Set();
-                for (let stylesheet of document.styleSheets) {
-                    try {
-                        for (let rule of stylesheet.cssRules) {
-                            if (rule.type === CSSRule.MEDIA_RULE) {
-                                const mediaText = rule.media.mediaText;
-                                const widthMatches = mediaText.match(/\\((?:max-|min-)?width:\\s*(\\d+)px\\)/g);
-                                if (widthMatches) {
-                                    widthMatches.forEach(match => {
-                                        const width = parseInt(match.match(/\\d+/)[0]);
-                                        if (width > 0) {
-                                            breakpoints.add(width);
-                                        }
-                                    });
+                        const fontFamily = style.getPropertyValue('font-family');
+                        if (fontFamily && fontFamily !== 'initial' && fontFamily !== 'inherit') {
+                            const families = fontFamily.split(',').map(f => 
+                                f.trim().replace(/['"]/g, '')
+                            );
+                            families.forEach(family => {
+                                if (family && !family.includes('serif') && !family.includes('sans-serif')) {
+                                    analysis.font_families.push(family);
                                 }
+                            });
+                        }
+                        
+                        // Analyze layout patterns
+                        const display = style.getPropertyValue('display');
+                        if (display === 'flex' || display === 'inline-flex') {
+                            analysis.flexbox_usage++;
+                        }
+                        
+                        if (display === 'grid' || display === 'inline-grid') {
+                            const gridTemplate = style.getPropertyValue('grid-template-columns') || 
+                                            style.getPropertyValue('grid-template-rows');
+                            if (gridTemplate && gridTemplate !== 'none') {
+                                analysis.grid_systems.push({
+                                    element: element.tagName.toLowerCase(),
+                                    template: gridTemplate
+                                });
                             }
                         }
+                        
+                        // Check for CSS framework classes
+                        const className = element.className;
+                        if (typeof className === 'string') {
+                            const frameworks = {
+                                'bootstrap': /\\b(container|row|col-|btn-|card-|navbar-)/,
+                                'tailwind': /\\b(flex|grid|p-|m-|text-|bg-|border-)/,
+                                'bulma': /\\b(column|hero|navbar|card|button)/,
+                                'foundation': /\\b(row|column|button|callout)/
+                            };
+                            
+                            Object.entries(frameworks).forEach(([framework, pattern]) => {
+                                if (pattern.test(className) && !analysis.css_frameworks.includes(framework)) {
+                                    analysis.css_frameworks.push(framework);
+                                }
+                            });
+                        }
+                        
                     } catch (e) {
-                        // Can't access cross-origin stylesheets
+                        // Skip elements that can't be accessed
+                        continue;
                     }
+                }
+                
+                // Convert colors to array and limit
+                analysis.color_palette = Array.from(colors).slice(0, 30);
+                
+                // Remove duplicate fonts and limit
+                analysis.font_families = [...new Set(analysis.font_families)].slice(0, 15);
+                
+                // Detect primary layout type
+                if (analysis.grid_systems.length > 0) {
+                    analysis.layout_type = 'grid';
+                } else if (analysis.flexbox_usage > 5) {
+                    analysis.layout_type = 'flex';
+                } else {
+                    analysis.layout_type = 'traditional';
+                }
+                
+                // Extract responsive breakpoints from CSS
+                const breakpoints = new Set();
+                try {
+                    for (let stylesheet of document.styleSheets) {
+                        try {
+                            for (let rule of stylesheet.cssRules) {
+                                if (rule.type === CSSRule.MEDIA_RULE) {
+                                    const mediaText = rule.media.mediaText;
+                                    const widthMatches = mediaText.match(/\\((?:max-|min-)?width:\\s*(\\d+)px\\)/g);
+                                    if (widthMatches) {
+                                        widthMatches.forEach(match => {
+                                            const width = parseInt(match.match(/\\d+/)[0]);
+                                            if (width > 200 && width < 2000) { // Reasonable breakpoint range
+                                                breakpoints.add(width);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Can't access cross-origin stylesheets
+                            continue;
+                        }
+                    }
+                } catch (e) {
+                    // StyleSheets access failed
                 }
                 
                 analysis.responsive_breakpoints = Array.from(breakpoints).sort((a, b) => a - b);
                 
+                // Analyze spacing patterns
+                const spacingValues = new Set();
+                for (let element of Array.from(elements).slice(0, 200)) { // Limit to first 200 elements
+                    try {
+                        const style = window.getComputedStyle(element);
+                        ['margin', 'padding'].forEach(prop => {
+                            const value = style.getPropertyValue(prop);
+                            if (value && value !== '0px' && value !== 'initial') {
+                                spacingValues.add(value);
+                            }
+                        });
+                    } catch (e) {
+                        continue;
+                    }
+                }
+                
+                analysis.spacing_patterns = Array.from(spacingValues).slice(0, 20);
+                
                 return analysis;
             }
             
-            return analyzeLayout();
+            return analyzeEnhancedLayout();
         })()
         """
     
+    async def _wait_for_dynamic_content(self, page) -> None:
+        """Enhanced waiting strategy for dynamic content."""
+        try:
+            # Wait for network idle
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            
+            # Wait for common dynamic content indicators
+            await page.evaluate("""
+                async () => {
+                    // Wait for common framework indicators
+                    const frameworks = ['React', 'Vue', 'Angular', '$', 'jQuery'];
+                    let frameworkLoaded = false;
+                    
+                    for (const fw of frameworks) {
+                        if (window[fw]) {
+                            frameworkLoaded = true;
+                            break;
+                        }
+                    }
+                    
+                    if (frameworkLoaded) {
+                        // Additional wait for framework initialization
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                    }
+                    
+                    // Wait for any remaining animations to complete
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    return true;
+                }
+            """)
+            
+            # Check for lazy-loaded content
+            await page.evaluate("""
+                () => {
+                    // Scroll to trigger lazy loading
+                    window.scrollTo(0, document.body.scrollHeight);
+                    window.scrollTo(0, 0);
+                }
+            """)
+            
+            # Final wait for lazy content to load
+            await page.wait_for_timeout(2000)
+        
+        except Exception as e:
+            logger.warning(f"Enhanced waiting failed, proceeding with extraction: {str(e)}")
+
     async def extract_dom_structure(
         self,
         url: str,
@@ -588,22 +835,10 @@ class DOMExtractionService:
         include_computed_styles: bool = True,
         max_depth: int = 10
     ) -> DOMExtractionResult:
-        """
-        Extract complete DOM structure, styles, and assets from a web page.
-        
-        Args:
-            url: URL to extract from
-            session_id: Session identifier
-            wait_for_load: Whether to wait for page load completion
-            include_computed_styles: Whether to include computed styles
-            max_depth: Maximum DOM depth to extract
-            
-        Returns:
-            Complete DOM extraction result
-        """
+        """Enhanced DOM extraction with proper dynamic content waiting."""
         start_time = time.time()
         
-        logger.info(f"Starting DOM extraction for {url}")
+        logger.info(f"Starting enhanced DOM extraction for {url}")
         
         if not self.browser_manager:
             raise BrowserError("Browser manager not available")
@@ -614,38 +849,38 @@ class DOMExtractionService:
                 await self.browser_manager.navigate_to_url(page, url, wait_for="networkidle")
                 
                 if wait_for_load:
-                    await self.browser_manager.wait_for_page_load(page)
-                    # Additional wait for dynamic content
-                    await page.wait_for_timeout(3000)
+                    # Enhanced waiting strategy for dynamic content
+                    await self._wait_for_dynamic_content(page)
                 
                 # Extract page structure metadata
                 page_structure = await self._extract_page_structure(page, url)
                 
-                # Extract DOM elements
-                logger.info("Extracting DOM elements...")
+                # Extract DOM elements with dynamic content support
+                logger.info("Extracting DOM elements with dynamic content...")
                 dom_data = await page.evaluate(self._javascript_extractors["dom_extractor"])
+                
+                if not dom_data.get("page_fully_loaded"):
+                    logger.warning("Page may not be fully loaded - extraction might be incomplete")
+                
                 elements = [ExtractedElement(**elem) for elem in dom_data["elements"]]
                 
-                # Extract stylesheets
-                logger.info("Extracting stylesheets...")
-                style_data = await page.evaluate(self._javascript_extractors["style_extractor"])
+                # Extract stylesheets with enhanced CSS rule extraction
+                logger.info("Extracting enhanced stylesheets...")
+                style_data = await page.evaluate(self._get_style_extractor_script())
                 stylesheets = [ExtractedStylesheet(**sheet) for sheet in style_data["stylesheets"]]
                 
-                # Extract assets
-                logger.info("Extracting assets...")
+                # Extract assets with better URL resolution
+                logger.info("Extracting assets with enhanced resolution...")
                 asset_data = await page.evaluate(self._javascript_extractors["asset_extractor"])
-                raw_assets = asset_data["assets"]
-
-                # Convert and resolve asset URLs - FIXED VERSION
                 assets = []
-                for asset_info in raw_assets:
+                for asset_info in asset_data["assets"]:
                     try:
                         asset = ExtractedAsset(
                             url=urljoin(url, asset_info["url"]),
-                            asset_type=asset_info["asset_type"],  # FIXED: was assetType
+                            asset_type=asset_info["asset_type"],
                             is_background=asset_info.get("is_background", False),
                             usage_context=asset_info.get("usage_context", []),
-                            alt_text=asset_info.get("alt_text"),  # FIXED: was altText
+                            alt_text=asset_info.get("alt_text"),
                             dimensions=tuple(asset_info["dimensions"]) if asset_info.get("dimensions") else None
                         )
                         assets.append(asset)
@@ -653,9 +888,9 @@ class DOMExtractionService:
                         logger.warning(f"Failed to process asset {asset_info.get('url', 'unknown')}: {str(e)}")
                         continue
                 
-                # Analyze layout
-                logger.info("Analyzing layout...")
-                layout_data = await page.evaluate(self._javascript_extractors["layout_analyzer"])
+                # Enhanced layout analysis
+                logger.info("Performing enhanced layout analysis...")
+                layout_data = await page.evaluate(self._get_layout_analyzer_script())
                 
                 extraction_time = time.time() - start_time
                 
@@ -669,10 +904,10 @@ class DOMExtractionService:
                     stylesheets=stylesheets,
                     assets=assets,
                     layout_analysis=layout_data,
-                    color_palette=layout_data.get("colorPalette", []),
-                    font_families=layout_data.get("fontFamilies", []),
-                    responsive_breakpoints=layout_data.get("responsiveBreakpoints", []),
-                    dom_depth=dom_data.get("domDepth", 0),
+                    color_palette=layout_data.get("color_palette", []),
+                    font_families=layout_data.get("font_families", []),
+                    responsive_breakpoints=layout_data.get("responsive_breakpoints", []),
+                    dom_depth=dom_data.get("dom_depth", 0),
                     total_elements=len(elements),
                     total_stylesheets=len(stylesheets),
                     total_assets=len(assets),
@@ -680,7 +915,7 @@ class DOMExtractionService:
                 )
                 
                 logger.info(
-                    f"DOM extraction completed: {len(elements)} elements, "
+                    f"Enhanced DOM extraction completed: {len(elements)} elements, "
                     f"{len(stylesheets)} stylesheets, {len(assets)} assets "
                     f"in {extraction_time:.2f}s"
                 )
@@ -688,8 +923,9 @@ class DOMExtractionService:
                 return result
                 
         except Exception as e:
+            # Error handling remains the same
             extraction_time = time.time() - start_time
-            error_msg = f"DOM extraction failed: {str(e)}"
+            error_msg = f"Enhanced DOM extraction failed: {str(e)}"
             logger.error(error_msg)
             
             return DOMExtractionResult(

@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Any, List
 import asyncio
+import random
+from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime, UTC
 import json
@@ -21,14 +22,15 @@ except ImportError:
 class LLMService:
     """
     Service for generating HTML using LLM based on component analysis.
-    
-    Takes component detection results and generates semantically equivalent HTML
-    that preserves the visual structure and functionality of the original site.
+    Enhanced with retry logic and rate limiting.
     """
     
     def __init__(self):
         self._client = None
         self._validate_configuration()
+        self.max_retries = 3
+        self.base_delay = 2  # Base delay in seconds
+        self.max_delay = 60  # Max delay in seconds
     
     def _validate_configuration(self) -> None:
         """Validate LLM service configuration."""
@@ -49,6 +51,83 @@ class LLMService:
             self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         return self._client
     
+    async def _make_request_with_retry(self, prompt: str) -> Dict[str, Any]:
+        """Make API request with exponential backoff retry logic."""
+        client = self._get_client()
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                logger.info(f"Making LLM request (attempt {attempt + 1}/{self.max_retries + 1})")
+                
+                response = await asyncio.to_thread(
+                    client.messages.create,
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=8000,
+                    temperature=0.1,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                
+                logger.info("LLM request successful")
+                return {
+                    "content": response.content[0].text,
+                    "usage": response.usage
+                }
+                
+            except anthropic.RateLimitError as e:
+                logger.warning(f"Rate limit error on attempt {attempt + 1}: {str(e)}")
+                if attempt < self.max_retries:
+                    delay = self._calculate_delay(attempt, base_delay=10)  # Longer delay for rate limits
+                    logger.info(f"Waiting {delay} seconds before retry...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    raise LLMError(f"Rate limit exceeded after {self.max_retries + 1} attempts", provider="anthropic")
+            
+            except anthropic.APIError as e:
+                error_message = str(e)
+                logger.warning(f"API error on attempt {attempt + 1}: {error_message}")
+                
+                # Check for overload (529) or server errors (5xx)
+                if "overloaded" in error_message.lower() or "529" in error_message:
+                    if attempt < self.max_retries:
+                        delay = self._calculate_delay(attempt, base_delay=5)
+                        logger.info(f"API overloaded, waiting {delay} seconds before retry...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        raise LLMError(f"API overloaded after {self.max_retries + 1} attempts", provider="anthropic")
+                
+                # For other API errors, don't retry
+                raise LLMError(f"API error: {error_message}", provider="anthropic")
+            
+            except Exception as e:
+                logger.error(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
+                if attempt < self.max_retries:
+                    delay = self._calculate_delay(attempt)
+                    logger.info(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    raise LLMError(f"Request failed after {self.max_retries + 1} attempts: {str(e)}", provider="anthropic")
+        
+        # This should never be reached, but just in case
+        raise LLMError("Maximum retries exceeded", provider="anthropic")
+    
+    def _calculate_delay(self, attempt: int, base_delay: Optional[int] = None) -> float:
+        """Calculate delay with exponential backoff and jitter."""
+        if base_delay is None:
+            base_delay = self.base_delay
+        
+        # Exponential backoff: base_delay * (2 ^ attempt)
+        delay = base_delay * (2 ** attempt)
+        
+        # Add jitter (random factor between 0.5 and 1.5)
+        jitter = random.uniform(0.5, 1.5)
+        delay *= jitter
+        
+        # Cap at max_delay
+        return min(delay, self.max_delay)
+    
     async def generate_html_from_components(
         self,
         component_result: ComponentDetectionResult,
@@ -58,15 +137,7 @@ class LLMService:
     ) -> Dict[str, Any]:
         """
         Generate HTML based on detected components and DOM structure.
-        
-        Args:
-            component_result: Detected components from ComponentDetector
-            dom_result: Original DOM extraction result
-            original_url: Source website URL
-            quality_level: Generation quality (fast, balanced, high)
-            
-        Returns:
-            Dict containing generated HTML, CSS, and metadata
+        Enhanced with retry logic for better reliability.
         """
         logger.info(f"Generating HTML for {original_url} with {component_result.total_components} components")
         
@@ -76,19 +147,12 @@ class LLMService:
                 component_result, dom_result, original_url, quality_level
             )
             
-            # Call Anthropic API
-            client = self._get_client()
-            
-            response = await asyncio.to_thread(
-                client.messages.create,
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=8000,
-                temperature=0.1,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            # Make request with retry logic
+            api_response = await self._make_request_with_retry(prompt)
             
             # Parse response
-            generated_content = response.content[0].text
+            generated_content = api_response["content"]
+            usage = api_response["usage"]
             
             # Extract HTML and CSS from response
             html_content, css_content = self._parse_llm_response(generated_content)
@@ -101,7 +165,7 @@ class LLMService:
                 "css_content": css_content,
                 "similarity_score": similarity_score,
                 "generation_time": 0.0,  # Will be set by caller
-                "tokens_used": response.usage.input_tokens + response.usage.output_tokens,
+                "tokens_used": usage.input_tokens + usage.output_tokens,
                 "components_replicated": self._count_replicated_components(component_result, html_content),
                 "quality_level": quality_level,
                 "model_used": "claude-3-5-sonnet-20241022"
