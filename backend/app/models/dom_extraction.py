@@ -104,6 +104,38 @@ class PageStructureModel(BaseModel):
     schema_org: List[Dict[str, Any]] = Field(default_factory=list, description="Schema.org structured data")
 
 
+# --- New Models for Design System ---
+class ColorPaletteModel(BaseModel):
+    primary_background: Optional[str] = None
+    primary_text: Optional[str] = None
+    accent: Optional[str] = None
+    secondary_accent: Optional[str] = None
+    is_dark_theme: bool = False
+    all_colors: List[str] = Field(default_factory=list)
+
+class TypographyStyleModel(BaseModel):
+    font_family: Optional[str] = None
+    font_size: Optional[str] = None
+    font_weight: Optional[str] = None
+    line_height: Optional[str] = None
+    color: Optional[str] = None
+
+class TypographyAnalysisModel(BaseModel):
+    body: TypographyStyleModel
+    h1: Optional[TypographyStyleModel] = None
+    h2: Optional[TypographyStyleModel] = None
+    h3: Optional[TypographyStyleModel] = None
+    all_families: List[str] = Field(default_factory=list)
+
+class StyleAnalysisModel(BaseModel):
+    theme: ColorPaletteModel
+    typography: TypographyAnalysisModel
+    css_variables: Dict[str, str] = Field(default_factory=dict)
+    responsive_breakpoints: List[int] = Field(default_factory=list)
+    layout_type: str = "unknown"
+# --- End of New Models ---
+
+
 class DOMExtractionResultModel(BaseModel):
     """Model for complete DOM extraction result."""
     url: str = Field(..., description="Extracted URL")
@@ -117,11 +149,8 @@ class DOMExtractionResultModel(BaseModel):
     stylesheets: List[ExtractedStylesheetModel] = Field(..., description="Extracted stylesheets")
     assets: List[ExtractedAssetModel] = Field(..., description="Extracted assets")
     
-    # Analysis data
-    layout_analysis: Dict[str, Any] = Field(..., description="Layout analysis results")
-    color_palette: List[str] = Field(..., description="Extracted color palette")
-    font_families: List[str] = Field(..., description="Font families used")
-    responsive_breakpoints: List[int] = Field(..., description="Responsive breakpoints found")
+    # Analysis data - REPLACED WITH STRUCTURED MODEL
+    style_analysis: StyleAnalysisModel = Field(..., description="Comprehensive style analysis of the page")
     
     # Technical metrics
     dom_depth: int = Field(default=0, description="Maximum DOM depth")

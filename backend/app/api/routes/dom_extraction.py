@@ -47,21 +47,12 @@ async def extract_dom_structure(
 ):
     """
     Extract DOM structure, styles, and assets from a web page.
-    
-    Args:
-        request: DOM extraction request parameters
-        background_tasks: FastAPI background tasks
-        
-    Returns:
-        DOM extraction results
     """
     logger.info(f"Starting DOM extraction for URL: {request.url}")
     
     try:
-        # Initialize DOM extraction service with browser manager
         extraction_service = DOMExtractionService(browser_manager)
         
-        # Perform extraction
         result = await extraction_service.extract_dom_structure(
             url=str(request.url),
             session_id=request.session_id,
@@ -70,12 +61,8 @@ async def extract_dom_structure(
             max_depth=request.max_depth
         )
 
-        if result.success:
-            result_model = DOMExtractionResultModel(**result.__dict__)
-        else:
-            result_model = None
+        result_model = DOMExtractionResultModel(**result.__dict__) if result.success else None
             
-        # Save result if requested
         saved_file_path = None
         if request.save_result and result.success:
             saved_file_path = await storage.save_extraction_result(
@@ -83,27 +70,19 @@ async def extract_dom_structure(
                 output_format=request.output_format.value
             )
         
-        # Update session state with extraction info
         app_state.update_session(request.session_id, {
             "dom_extracted": True,
             "extraction_success": result.success,
             "extraction_time": result.extraction_time,
             "total_elements": result.total_elements,
-            "total_stylesheets": result.total_stylesheets,
-            "total_assets": result.total_assets,
-            "last_extraction_result": result_model.model_dump() if result_model else None
+            "last_extraction_result": result_model.model_dump(exclude_none=True) if result_model else None
         })
         
-        logger.info(
-            f"DOM extraction completed: {result.total_elements} elements, "
-            f"{result.total_stylesheets} stylesheets, {result.total_assets} assets "
-            f"for session {request.session_id}"
-        )
+        logger.info(f"DOM extraction completed for session {request.session_id}")
         
         return DOMExtractionResponse(
             success=result.success,
-            message=f"Extracted {result.total_elements} elements successfully" if result.success 
-                   else f"Extraction failed: {result.error_message}",
+            message="Extraction successful" if result.success else f"Extraction failed: {result.error_message}",
             extraction_result=result_model,
             saved_file_path=saved_file_path,
             session_id=request.session_id,
@@ -121,6 +100,7 @@ async def extract_dom_structure(
             session_id=request.session_id,
             timestamp=datetime.now(UTC)
         )
+
 
 
 @router.get("/session/{session_id}/status", response_model=DOMExtractionStatusResponse)
