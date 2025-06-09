@@ -42,7 +42,7 @@ class LLMService:
         delay = (base_delay or self.base_delay) * (2 ** attempt) + random.uniform(0, 1)
         return min(delay, self.max_delay)
 
-    async def _make_request_with_retry(self, messages: List[Dict], model: str = "claude-3-5-sonnet-20240620", max_tokens: int = 4096) -> Dict[str, Any]:
+    async def _make_request_with_retry(self, messages: List[Dict], model: str = "claude-sonnet-4-20250514", max_tokens: int = 4096) -> Dict[str, Any]:
         client = self._get_client()
         for attempt in range(self.max_retries + 1):
             try:
@@ -251,8 +251,34 @@ Begin generating the complete HTML file now.
             return html_match.group(1).strip(), None
         return response_text, None
 
-    def _calculate_similarity_score(self, component_result, dom_result, generated_html) -> float:
-        return 98.0
+    def _calculate_similarity_score(self, component_result: ComponentDetectionResult, dom_result: DOMExtractionResult, generated_html: str) -> float:
+        """
+        Calculates a more accurate similarity score based on the replication of detected component types.
+        The score is the percentage of unique component types from the original page
+        that are found in the generated HTML.
+        """
+        if not component_result.components:
+            # If there were no components to detect, we can assume it was a simple page.
+            return 95.0 if len(generated_html) > 50 else 100.0
+
+        # Get the set of unique component types that were detected in the original DOM
+        original_types = {comp.component_type.value for comp in component_result.components}
+        if not original_types:
+            return 100.0
+
+        replicated_types = set()
+        # Check which of the original components appear to be in the generated HTML.
+        # This check is basic and looks for the component's label within the generated code.
+        for component in component_result.components:
+            # A component is considered replicated if its label appears in the generated code
+            if component.label and component.label.lower() in generated_html.lower():
+                replicated_types.add(component.component_type.value)
+
+        # Calculate the score based on the ratio of replicated types to original types
+        score = (len(replicated_types) / len(original_types)) * 100.0
+        
+        # Cap the score at 99.0 to be more realistic, as a perfect 100% clone is rare.
+        return min(score, 99.0)
 
     def _count_replicated_components(self, component_result, generated_html) -> Dict[str, int]:
         replicated = {}
