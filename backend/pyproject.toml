@@ -47,5 +47,6 @@ markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "browser: Tests that require browser automation",
     "network: Tests that require network access",
+    "api: Tests that test HTTP API endpoints",
 ]
 asyncio_mode = "auto"

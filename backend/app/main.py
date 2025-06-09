@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+import json
+from fastapi.responses import JSONResponse as BaseJSONResponse
 from fastapi.exception_handlers import http_exception_handler
 from contextlib import asynccontextmanager
 import time
@@ -26,6 +27,26 @@ from .dependencies import get_browser_manager
 # Initialize logging
 setup_logging()
 logger = get_logger(__name__)
+
+# Custom JSON Response that handles datetime serialization
+class JSONResponse(BaseJSONResponse):
+    """Custom JSON response that properly handles datetime serialization."""
+    
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+            default=self._json_serializer
+        ).encode("utf-8")
+    
+    def _json_serializer(self, obj):
+        """Custom JSON serializer for special types."""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 @asynccontextmanager
@@ -161,7 +182,7 @@ async def website_cloner_exception_handler(request: Request, exc: WebsiteClonerE
     
     return JSONResponse(
         status_code=status_code,
-        content=error_response.dict()
+        content=error_response.model_dump()
     )
 
 
@@ -179,7 +200,7 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
     
     return JSONResponse(
         status_code=exc.status_code,
-        content=error_response.dict()
+        content=error_response.model_dump()
     )
 
 
@@ -200,7 +221,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     
     return JSONResponse(
         status_code=500,
-        content=error_response.dict()
+        content=error_response.model_dump()
     )
 
 

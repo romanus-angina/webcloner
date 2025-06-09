@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import List
 from datetime import datetime, UTC
 import uuid
+import time
 
 from ...dependencies import (
     get_app_state, 
@@ -18,11 +19,14 @@ from ...models.responses import (
     CloneStatus, 
     ProgressStep,
     RefinementResponse,
-    SessionListResponse
+    SessionListResponse,
+    CloneResult
 )
 from ...core.exceptions import ValidationError, SessionError
 from ...config import Settings
 import logging
+from ...services.llm_service import llm_service
+from ...services.component_detector import ComponentDetector
 
 router = APIRouter()
 
@@ -75,7 +79,7 @@ async def clone_website(
     # Update session with initial data
     app_state.update_session(session_id, {
         "status": CloneStatus.PENDING.value,
-        "request": request.dict(),
+        "request": request.model_dump(),
         "request_id": request_id,
         "progress": response.progress
     })
@@ -282,7 +286,6 @@ async def delete_session(
     }
 
 
-# Background task functions (placeholder implementations)
 async def process_clone_request(
     session_id: str,
     request: CloneWebsiteRequest,
@@ -292,7 +295,7 @@ async def process_clone_request(
 ):
     """
     Background task to process the actual cloning request.
-    This is a placeholder implementation - the actual cloning logic will be added later.
+    Enhanced with component detection and LLM generation.
     """
     logger.info(f"Processing clone request for session {session_id}")
     
@@ -303,22 +306,107 @@ async def process_clone_request(
             "updated_at": datetime.now(UTC)
         })
         
-        # Simulate processing time
-        import asyncio
-        await asyncio.sleep(2)
+        # Step 1: DOM Extraction
+        from ...dependencies import get_browser_manager, get_dom_extraction_service
+        browser_manager = get_browser_manager()
+        dom_service = get_dom_extraction_service()
         
-        # For now, just mark as completed with dummy data
+        if not browser_manager._is_initialized:
+            await browser_manager.initialize()
+        
+        dom_service.browser_manager = browser_manager
+        
+        logger.info(f"Extracting DOM structure for {request.url}")
+        dom_result = await dom_service.extract_dom_structure(
+            url=str(request.url),
+            session_id=session_id,
+            wait_for_load=True,
+            include_computed_styles=request.include_styling,
+            max_depth=10
+        )
+        
+        if not dom_result.success:
+            raise ProcessingError(f"DOM extraction failed: {dom_result.error_message}")
+        
+        # Step 2: Component Detection
+        app_state.update_session(session_id, {
+            "status": CloneStatus.ANALYZING.value,
+            "updated_at": datetime.now(UTC),
+            "progress": [
+                ProgressStep(
+                    step_name="Component Analysis",
+                    status=CloneStatus.ANALYZING,
+                    started_at=datetime.now(UTC),
+                    progress_percentage=30.0,
+                    message="Detecting UI components..."
+                )
+            ]
+        })
+        
+        logger.info(f"Detecting components for session {session_id}")
+        component_detector = ComponentDetector(dom_result)
+        component_result = component_detector.detect_components()
+        
+        logger.info(f"Detected {component_result.total_components} components in {component_result.detection_time_seconds:.2f}s")
+        
+        # Step 3: LLM HTML Generation
+        app_state.update_session(session_id, {
+            "status": CloneStatus.GENERATING.value,
+            "updated_at": datetime.now(UTC),
+            "progress": [
+                ProgressStep(
+                    step_name="HTML Generation",
+                    status=CloneStatus.GENERATING,
+                    started_at=datetime.now(UTC),
+                    progress_percentage=60.0,
+                    message=f"Generating HTML from {component_result.total_components} detected components..."
+                )
+            ]
+        })
+        
+        logger.info(f"Generating HTML for session {session_id}")
+        generation_start = time.time()
+        
+        llm_result = await llm_service.generate_html_from_components(
+            component_result=component_result,
+            dom_result=dom_result,
+            original_url=str(request.url),
+            quality_level=request.quality
+        )
+        
+        generation_time = time.time() - generation_start
+        llm_result["generation_time"] = generation_time
+        
+        # Step 4: Complete
         app_state.update_session(session_id, {
             "status": CloneStatus.COMPLETED.value,
             "updated_at": datetime.now(UTC),
-            "result": {
-                "html_content": "<html><body>Placeholder HTML</body></html>",
-                "generation_time": 2.0,
-                "similarity_score": 85.0
-            }
+            "result": CloneResult(
+                html_content=llm_result["html_content"],
+                css_content=llm_result.get("css_content"),
+                assets=[],  # TODO: Implement asset handling
+                similarity_score=llm_result["similarity_score"],
+                generation_time=llm_result["generation_time"],
+                tokens_used=llm_result["tokens_used"]
+            ).__dict__,
+            "component_analysis": {
+                "total_components": component_result.total_components,
+                "detection_time": component_result.detection_time_seconds,
+                "components_replicated": llm_result["components_replicated"]
+            },
+            "progress": [
+                ProgressStep(
+                    step_name="Completed",
+                    status=CloneStatus.COMPLETED,
+                    started_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC),
+                    progress_percentage=100.0,
+                    message=f"Website cloned successfully! Similarity: {llm_result['similarity_score']:.1f}%"
+                )
+            ]
         })
         
-        logger.info(f"Clone request completed for session {session_id}")
+        logger.info(f"Clone request completed for session {session_id}: {llm_result['similarity_score']:.1f}% similarity")
         
     except Exception as e:
         logger.error(f"Error processing clone request {session_id}: {str(e)}")

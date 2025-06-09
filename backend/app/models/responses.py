@@ -50,6 +50,11 @@ class CloneResponse(BaseModel):
     estimated_completion: Optional[datetime] = Field(None, description="Estimated completion time")
     error_message: Optional[str] = Field(None, description="Error message if failed")
 
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
 
 class HealthResponse(BaseModel):
     """Health check response."""
@@ -60,6 +65,11 @@ class HealthResponse(BaseModel):
     uptime: float = Field(..., description="Uptime in seconds")
     details: Optional[Dict[str, Any]] = Field(None, description="Detailed health information")
 
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
 
 class ErrorResponse(BaseModel):
     """Standard error response format."""
@@ -69,6 +79,11 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict[str, Any]] = Field(None, description="Additional error details")
     timestamp: datetime = Field(..., description="When the error occurred")
     request_id: Optional[str] = Field(None, description="Request identifier for tracking")
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class RefinementResponse(BaseModel):
@@ -89,6 +104,11 @@ class WebSocketMessage(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     timestamp: datetime = Field(..., description="Message timestamp")
     data: Dict[str, Any] = Field(..., description="Message payload")
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class SessionListResponse(BaseModel):
