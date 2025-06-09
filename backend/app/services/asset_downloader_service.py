@@ -57,7 +57,7 @@ class AssetDownloaderService:
             'inline_content': 0
         }
 
-    async def download_assets(self, assets: List[ExtractedAssetModel]) -> List[Dict[str, Any]]:
+    async def download_assets(self, assets: List[ExtractedAssetModel], base_url: str = None) -> List[Dict[str, Any]]:
         """
         Enhanced asset downloading with better categorization and error handling.
         """
@@ -66,6 +66,7 @@ class AssetDownloaderService:
             return []
         
         logger.info(f"Processing {len(assets)} assets for download/handling")
+        logger.info(f"Base URL for relative URLs: {base_url}")
         
         # Categorize assets for different processing
         external_assets = []
@@ -78,11 +79,17 @@ class AssetDownloaderService:
             elif hasattr(asset, 'url') and asset.url:
                 if asset.url.startswith('data:'):
                     data_url_assets.append(asset)
-                elif asset.url.startswith(('http://', 'https://', '//')):
-                    external_assets.append(asset)
+                elif asset.url.startswith(('http://', 'https://', '//', '/')):
+                    # Clean the URL (this will handle relative URLs)
+                    cleaned_url = self._clean_url(asset.url, base_url)
+                    if cleaned_url:
+                        # Update the asset with the cleaned URL
+                        asset.url = cleaned_url
+                        external_assets.append(asset)
+                    else:
+                        logger.warning(f"Failed to clean URL: {asset.url}")
                 else:
-                    # Relative URLs - skip for now
-                    logger.warning(f"Skipping relative URL: {asset.url}")
+                    logger.warning(f"Unhandled URL pattern: {asset.url}")
             else:
                 logger.warning(f"Asset has no URL or content: {asset}")
         
@@ -370,8 +377,8 @@ class AssetDownloaderService:
         
         return self._create_error_result("Unsupported inline asset", asset)
 
-    def _clean_url(self, url: str) -> Optional[str]:
-        """Clean and validate URL."""
+    def _clean_url(self, url: str, base_url: str = None) -> Optional[str]:
+        """Clean and validate URL, handling relative URLs."""
         if not url:
             return None
         
@@ -379,10 +386,15 @@ class AssetDownloaderService:
         if url.startswith('//'):
             url = 'https:' + url
         
-        # Handle relative URLs (skip for now)
+        # Handle relative URLs - CONVERT TO ABSOLUTE
         if url.startswith('/') and not url.startswith('//'):
-            logger.warning(f"Relative URL found, skipping: {url}")
-            return None
+            if base_url:
+                from urllib.parse import urljoin
+                url = urljoin(base_url, url)
+                logger.info(f"Converted relative URL to absolute: {url}")
+            else:
+                logger.warning(f"Relative URL found but no base_url provided: {url}")
+                return None
         
         # Basic URL validation
         if not url.startswith(('http://', 'https://', 'data:')):

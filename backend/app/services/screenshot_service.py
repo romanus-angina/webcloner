@@ -160,6 +160,88 @@ class ScreenshotService:
         timestamp = int(time.time())
         suffix = "original" if url else "generated"
         return f"{session_id}_{suffix}_{viewport.name.lower()}_{timestamp}.jpg"
+    
+    async def capture_screenshot_with_retry(self, page, viewport, wait_time=5000):
+        """Enhanced screenshot capture with better wait handling."""
+        
+        try:
+            # Wait for page to be properly loaded
+            await page.wait_for_load_state('networkidle', timeout=30000)
+            
+            # Additional wait for dynamic content
+            await asyncio.sleep(3)
+            
+            # Check if page is actually rendered (not blank)
+            page_content = await page.evaluate("""
+                () => {
+                    const body = document.body;
+                    return {
+                        hasContent: body && body.innerHTML.length > 100,
+                        bodyHeight: body ? body.scrollHeight : 0,
+                        visibleElements: document.querySelectorAll('*').length,
+                        backgroundColor: window.getComputedStyle(body).backgroundColor
+                    };
+                }
+            """)
+            
+            logger.info(f"Page content check: {page_content}")
+            
+            if not page_content.get('hasContent') or page_content.get('visibleElements', 0) < 10:
+                logger.warning("Page appears to be empty or not fully loaded")
+                # Try waiting a bit more
+                await asyncio.sleep(5)
+            
+            # Set viewport properly
+            await page.set_viewport_size(viewport.width, viewport.height)
+            
+            # Take screenshot
+            screenshot_bytes = await page.screenshot(
+                full_page=True,
+                type='jpeg',
+                quality=90
+            )
+            
+            return screenshot_bytes
+            
+        except Exception as e:
+            logger.error(f"Screenshot capture failed: {e}")
+            raise
+
+    async def _wait_for_dynamic_content(self, page, timeout: int = 15000):
+        """Enhanced waiting for dynamic content including better error handling."""
+        
+        # Wait for basic DOM ready
+        await page.wait_for_load_state('domcontentloaded', timeout=timeout)
+        
+        # Wait for network to be mostly idle
+        try:
+            await page.wait_for_load_state('networkidle', timeout=timeout)
+        except Exception as e:
+            logger.warning(f"Network idle wait failed: {e}")
+        
+        # Wait for images to start loading
+        try:
+            await page.wait_for_function("""
+                () => {
+                    const images = document.querySelectorAll('img');
+                    if (images.length === 0) return true;
+                    
+                    let loadedCount = 0;
+                    images.forEach(img => {
+                        if (img.complete || img.naturalWidth > 0) {
+                            loadedCount++;
+                        }
+                    });
+                    
+                    // Consider it ready if most images are loaded
+                    return loadedCount >= Math.min(images.length * 0.7, 10);
+                }
+            """, timeout=timeout)
+        except Exception as e:
+            logger.warning(f"Image loading wait failed: {e}")
+        
+        # Additional wait for any remaining content
+        await asyncio.sleep(2)
 
 # Global instance
 screenshot_service = ScreenshotService()

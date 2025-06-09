@@ -249,6 +249,12 @@ async def process_clone_request(
         
         dom_extraction_service.browser_manager = browser_manager
         screenshot_service.browser_manager = browser_manager
+
+        # Extract base URL for relative URL conversion
+        from urllib.parse import urlparse
+        parsed_url = urlparse(str(request.url))
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        logger.info(f"Base URL for relative assets: {base_url}")
         
         # 1. Enhanced Blueprint Extraction with Asset Detection
         await update_progress(session_id, app_state, "Blueprint Extraction", 
@@ -287,7 +293,7 @@ async def process_clone_request(
         
         
         asset_downloader = AssetDownloaderService(session_id)
-        download_results = await asset_downloader.download_assets(dom_result.assets)
+        download_results = await asset_downloader.download_assets(dom_result.assets, base_url)
         await asset_downloader.close()
         
         # Get download statistics

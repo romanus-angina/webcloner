@@ -21,180 +21,123 @@ def get_dom_extractor_script() -> str:
         let extractedAssets = new Map(); // Use Map for better deduplication
         let assetId = 0;
 
-        // Enhanced asset extraction with better error handling and detection
-        const extractAssetFromElement = (element) => {
-            const assets = [];
+        // ENHANCED: Extract ALL images including IMG tags
+        const extractAllImages = () => {
+            const images = [];
             
-            try {
-                // Handle IMG tags with multiple src attributes
-                if (element.tagName === 'IMG') {
-                    const sources = [
-                        element.src,
-                        element.getAttribute('src'),
-                        element.getAttribute('data-src'),
-                        element.getAttribute('data-lazy-src'),
-                        element.getAttribute('data-original'),
-                        element.dataset?.src,
-                        element.dataset?.lazySrc
-                    ].filter(Boolean);
-                    
-                    for (const src of sources) {
-                        if (src && !extractedAssets.has(src)) {
-                            extractedAssets.set(src, ++assetId);
-                            
-                            // Get image dimensions
-                            const rect = element.getBoundingClientRect();
-                            const naturalWidth = element.naturalWidth || element.width;
-                            const naturalHeight = element.naturalHeight || element.height;
-                            
-                            assets.push({
-                                id: assetId,
-                                url: src.startsWith('//') ? 'https:' + src : src,
-                                asset_type: 'image',
-                                alt_text: element.alt || element.getAttribute('aria-label') || element.title || `image-${assetId}`,
-                                width: naturalWidth || rect.width,
-                                height: naturalHeight || rect.height,
-                                display_width: rect.width,
-                                display_height: rect.height,
-                                loading: element.loading || 'eager',
-                                classes: Array.from(element.classList),
-                                parent_tag: element.parentElement?.tagName,
-                                usage_context: ['img-tag']
-                            });
-                        }
-                    }
-                }
+            // Get all IMG tags
+            const imgTags = document.querySelectorAll('img');
+            console.log(`Found ${imgTags.length} img tags`);
+            
+            imgTags.forEach((img, index) => {
+                const sources = [
+                    img.src,
+                    img.getAttribute('src'),
+                    img.getAttribute('data-src'),
+                    img.getAttribute('data-lazy-src'),
+                    img.getAttribute('data-original'),
+                    img.dataset?.src
+                ].filter(Boolean);
                 
-                // Enhanced SVG handling - both inline and external
-                if (element.tagName === 'SVG') {
-                    const svgContent = element.outerHTML;
-                    const svgId = element.id || element.getAttribute('class') || `inline-svg-${++assetId}`;
-                    
-                    if (!extractedAssets.has(svgId)) {
-                        extractedAssets.set(svgId, assetId);
+                sources.forEach(src => {
+                    if (src && !extractedAssets.has(src)) {
+                        extractedAssets.set(src, ++assetId);
                         
-                        // Extract viewBox and dimensions
-                        const viewBox = element.getAttribute('viewBox');
-                        const width = element.getAttribute('width') || element.style.width;
-                        const height = element.getAttribute('height') || element.style.height;
-                        
-                        assets.push({
+                        images.push({
                             id: assetId,
-                            content: svgContent,
-                            asset_type: 'svg',
-                            alt_text: element.getAttribute('aria-label') || element.title || svgId,
-                            is_inline: true,
-                            viewBox: viewBox,
-                            width: width,
-                            height: height,
-                            classes: Array.from(element.classList),
-                            usage_context: ['inline-svg']
-                        });
-                    }
-                }
-                
-                // Handle PICTURE elements with source sets
-                if (element.tagName === 'PICTURE') {
-                    const sources = element.querySelectorAll('source');
-                    const img = element.querySelector('img');
-                    
-                    sources.forEach((source, index) => {
-                        const srcset = source.getAttribute('srcset');
-                        const media = source.getAttribute('media');
-                        
-                        if (srcset) {
-                            // Extract URLs from srcset
-                            const urls = srcset.split(',').map(s => s.trim().split(' ')[0]);
-                            urls.forEach(url => {
-                                if (url && !extractedAssets.has(url)) {
-                                    extractedAssets.set(url, ++assetId);
-                                    assets.push({
-                                        id: assetId,
-                                        url: url.startsWith('//') ? 'https:' + url : url,
-                                        asset_type: 'image',
-                                        alt_text: img?.alt || `picture-source-${index}`,
-                                        media_query: media,
-                                        is_responsive: true,
-                                        usage_context: ['picture-source']
-                                    });
-                                }
-                            });
-                        }
-                    });
-                    
-                    if (img?.src && !extractedAssets.has(img.src)) {
-                        extractedAssets.set(img.src, ++assetId);
-                        assets.push({
-                            id: assetId,
-                            url: img.src,
+                            url: src,
                             asset_type: 'image',
-                            alt_text: img.alt || 'picture-fallback',
-                            is_fallback: true,
-                            usage_context: ['picture-img']
+                            alt_text: img.alt || img.getAttribute('aria-label') || `image-${index}`,
+                            width: img.naturalWidth || img.width,
+                            height: img.naturalHeight || img.height,
+                            classes: Array.from(img.classList),
+                            usage_context: ['img-tag'],
+                            element_location: `IMG[${index}]`
                         });
                     }
-                }
-                
-                // Enhanced background image detection
-                const style = window.getComputedStyle(element);
-                const backgroundImage = style.backgroundImage;
-                
-                if (backgroundImage && backgroundImage !== 'none') {
-                    // Handle multiple background images
-                    const urlMatches = backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/g);
-                    
-                    if (urlMatches) {
-                        urlMatches.forEach(match => {
-                            const urlMatch = match.match(/url\\(["']?([^"')]+)["']?\\)/);
-                            if (urlMatch && urlMatch[1] && !extractedAssets.has(urlMatch[1])) {
-                                const url = urlMatch[1];
-                                extractedAssets.set(url, ++assetId);
-                                
-                                assets.push({
-                                    id: assetId,
-                                    url: url.startsWith('//') ? 'https:' + url : url,
-                                    asset_type: 'background-image',
-                                    alt_text: element.getAttribute('aria-label') || element.title || 'background-image',
-                                    background_size: style.backgroundSize,
-                                    background_position: style.backgroundPosition,
-                                    background_repeat: style.backgroundRepeat,
-                                    element_tag: element.tagName,
-                                    element_classes: Array.from(element.classList),
-                                    usage_context: ['background-css']
-                                });
-                            }
-                        });
-                    }
-                }
-                
-                // Handle video and audio elements
-                if (['VIDEO', 'AUDIO'].includes(element.tagName)) {
-                    const poster = element.getAttribute('poster');
-                    if (poster && !extractedAssets.has(poster)) {
-                        extractedAssets.set(poster, ++assetId);
-                        assets.push({
-                            id: assetId,
-                            url: poster,
-                            asset_type: 'video-poster',
-                            alt_text: 'video-poster',
-                            usage_context: ['media-poster']
-                        });
-                    }
-                }
-                
-            } catch (error) {
-                console.warn('Asset extraction error for element:', element, error);
-            }
+                });
+            });
             
-            return assets;
+            console.log(`Extracted ${images.length} images from IMG tags`);
+            return images;
         };
 
-        // Also scan stylesheets for additional assets
+        // ENHANCED: Extract ALL SVGs
+        const extractAllSVGs = () => {
+            const svgs = [];
+            const svgTags = document.querySelectorAll('svg');
+            
+            console.log(`Found ${svgTags.length} SVG elements`);
+            
+            svgTags.forEach((svg, index) => {
+                const svgContent = svg.outerHTML;
+                const svgId = svg.id || svg.getAttribute('class') || `svg-${index}`;
+                
+                if (!extractedAssets.has(svgId)) {
+                    extractedAssets.set(svgId, ++assetId);
+                    
+                    svgs.push({
+                        id: assetId,
+                        content: svgContent,
+                        asset_type: 'svg',
+                        alt_text: svg.getAttribute('aria-label') || svg.title || svgId,
+                        is_inline: true,
+                        viewBox: svg.getAttribute('viewBox'),
+                        width: svg.getAttribute('width'),
+                        height: svg.getAttribute('height'),
+                        classes: Array.from(svg.classList),
+                        usage_context: ['inline-svg'],
+                        element_location: `SVG[${index}]`
+                    });
+                }
+            });
+            
+            console.log(`Extracted ${svgs.length} SVG elements`);
+            return svgs;
+        };
+
+        // ENHANCED: Extract background images from ALL elements
+        const extractBackgroundImages = () => {
+            const backgrounds = [];
+            const elements = document.querySelectorAll('*');
+            
+            console.log(`Scanning ${elements.length} elements for background images`);
+            
+            elements.forEach((el, index) => {
+                const style = window.getComputedStyle(el);
+                const bgImage = style.backgroundImage;
+                
+                if (bgImage && bgImage !== 'none' && bgImage.includes('url(')) {
+                    const urlMatch = bgImage.match(/url\\(["']?([^"')]+)["']?\\)/);
+                    if (urlMatch && urlMatch[1] && !extractedAssets.has(urlMatch[1])) {
+                        const url = urlMatch[1];
+                        extractedAssets.set(url, ++assetId);
+                        
+                        backgrounds.push({
+                            id: assetId,
+                            url: url,
+                            asset_type: 'background-image',
+                            alt_text: el.getAttribute('aria-label') || el.title || 'background-image',
+                            element_tag: el.tagName,
+                            classes: Array.from(el.classList),
+                            usage_context: ['background-css'],
+                            element_location: `${el.tagName}[${index}]`
+                        });
+                    }
+                }
+            });
+            
+            console.log(`Extracted ${backgrounds.length} background images`);
+            return backgrounds;
+        };
+
+        // ENHANCED: Extract assets from stylesheets
         const extractAssetsFromStylesheets = () => {
             const assets = [];
             
             try {
                 const sheets = Array.from(document.styleSheets);
+                console.log(`Scanning ${sheets.length} stylesheets`);
                 
                 for (const sheet of sheets) {
                     try {
@@ -230,6 +173,7 @@ def get_dom_extractor_script() -> str:
                 console.warn('Stylesheet asset extraction error:', error);
             }
             
+            console.log(`Extracted ${assets.length} assets from stylesheets`);
             return assets;
         };
 
@@ -347,10 +291,6 @@ def get_dom_extractor_script() -> str:
 
             const componentType = getComponentType(element);
             
-            // Extract assets from this element
-            const elementAssets = extractAssetFromElement(element);
-            allAssets.push(...elementAssets);
-            
             // Create HTML snippet - preserve more for assets
             let htmlSnippet = element.outerHTML;
             if (htmlSnippet.length > CONFIG.MAX_HTML_LENGTH) {
@@ -406,16 +346,29 @@ def get_dom_extractor_script() -> str:
             return componentData;
         };
 
-        // Start extraction
+        // START ENHANCED EXTRACTION
         console.log('Starting enhanced asset extraction...');
         const allAssets = [];
         
-        // Extract from stylesheets first
+        // 1. Extract ALL images first (most important)
+        const allImages = extractAllImages();
+        allAssets.push(...allImages);
+        
+        // 2. Extract ALL SVGs
+        const allSVGs = extractAllSVGs();
+        allAssets.push(...allSVGs);
+        
+        // 3. Extract background images
+        const backgroundImages = extractBackgroundImages();
+        allAssets.push(...backgroundImages);
+        
+        // 4. Extract from stylesheets
         const stylesheetAssets = extractAssetsFromStylesheets();
         allAssets.push(...stylesheetAssets);
-        console.log('Stylesheet assets found:', stylesheetAssets.length);
         
-        // Then extract from DOM tree
+        console.log(`Total assets found: IMG=${allImages.length}, SVG=${allSVGs.length}, BG=${backgroundImages.length}, CSS=${stylesheetAssets.length}`);
+        
+        // Build component tree
         const blueprint = buildComponentTree(document.body, 0, allAssets);
         console.log('DOM extraction completed. Total assets found:', allAssets.length);
         
@@ -433,11 +386,12 @@ def get_dom_extractor_script() -> str:
         
         console.log('Enhanced component extraction completed:', {
             components: componentCount,
-            assets: uniqueAssets.length,
+            total_assets: allAssets.length,
+            unique_assets: uniqueAssets.length,
             assetTypes: [...new Set(uniqueAssets.map(a => a.asset_type))]
         });
         
-        // FIXED: Proper JavaScript object syntax with all required commas
+        // Return results
         return { 
             blueprint: blueprint,
             assets: uniqueAssets.slice(0, CONFIG.MAX_ASSETS),
@@ -452,7 +406,12 @@ def get_dom_extractor_script() -> str:
                 debug_all_assets_count: allAssets.length,
                 debug_unique_assets_count: uniqueAssets.length,
                 debug_seen_urls_count: seenUrls.size,
-                debug_first_few_assets: allAssets.slice(0, 5)
+                debug_asset_breakdown: {
+                    images: allImages.length,
+                    svgs: allSVGs.length,
+                    backgrounds: backgroundImages.length,
+                    css_assets: stylesheetAssets.length
+                }
             }
         };
     })();
