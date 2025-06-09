@@ -91,6 +91,14 @@ class DOMExtractionService:
                 
                 logger.info(f"Extraction metadata: {metadata}")
 
+                # Debug asset extraction
+                if assets_data:
+                    logger.info(f"Assets found: {len(assets_data)}")
+                    for i, asset in enumerate(assets_data[:5]):  # Log first 5 assets
+                        logger.info(f"Asset {i+1}: type={asset.get('asset_type')}, url={asset.get('url', 'N/A')[:100]}, has_content={bool(asset.get('content'))}")
+                else:
+                    logger.warning("No assets found in extraction")
+
                 # Convert blueprint to model
                 blueprint_model = DetectedComponent(**blueprint_dict) if blueprint_dict else None
 

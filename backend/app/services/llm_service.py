@@ -150,6 +150,44 @@ class LLMService:
                 else:
                     raise LLMError(f"Request failed after multiple retries: {e}", provider="anthropic")
         raise LLMError("Maximum retries exceeded", provider="anthropic")
+    
+    def _ensure_complete_html(self, html_content: str) -> str:
+        """Ensure HTML is complete and well-formed."""
+        
+        html_content = html_content.strip()
+        
+        # Check if HTML starts properly
+        if not html_content.startswith('<!DOCTYPE'):
+            if html_content.startswith('<html'):
+                html_content = '<!DOCTYPE html>\n' + html_content
+            else:
+                # Wrap content in proper HTML structure
+                html_content = f'''<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Generated Website</title>
+        <style>
+            body {{ margin: 0; padding: 20px; font-family: system-ui, sans-serif; }}
+        </style>
+    </head>
+    <body>
+    {html_content}
+    </body>
+    </html>'''
+        
+        # Check if HTML ends properly
+        if not html_content.rstrip().endswith('</html>'):
+            # Find where to close
+            if '</body>' not in html_content:
+                # Add closing body and html
+                html_content = html_content.rstrip() + '\n</body>\n</html>'
+            else:
+                # Just add closing html
+                html_content = html_content.rstrip() + '\n</html>'
+        
+        return html_content
 
     async def generate_html_from_components(self, component_result, dom_result, original_url, quality_level="balanced") -> Dict[str, Any]:
         logger.info(f"Generating initial style-aware HTML for {original_url}")
@@ -200,11 +238,19 @@ class LLMService:
         api_response = await self._make_request_with_retry(messages)
         html_content, _ = self._parse_llm_response(api_response["content"])
         
+        # Ensure HTML is complete
+        html_content = self._ensure_complete_html(html_content)
+        
+        # Log for debugging
+        logger.info(f"Generated HTML length: {len(html_content)} characters")
+        logger.info(f"HTML starts with: {html_content[:100]}...")
+        logger.info(f"HTML ends with: ...{html_content[-100:]}")
+        
         return {
             "html_content": html_content,
             "tokens_used": api_response["usage"].input_tokens + api_response["usage"].output_tokens
         }
-
+    
     async def analyze_visual_differences(self, original_image_path: str, generated_image_path: str) -> str:
         logger.info("Performing VQA to analyze visual differences.")
         
@@ -301,7 +347,7 @@ class LLMService:
         return refined_html
 
     def _build_summary_prompt(self, summary: Dict[str, Any], dom_result: DOMExtractionResult, quality_level: str, original_url: str) -> str:
-        """Build a prompt using component summary with enhanced asset instructions."""
+        """Enhanced prompt that ensures complete HTML output with all assets."""
         
         component_counts = summary.get("component_counts", {})
         key_elements = summary.get("key_elements", [])
@@ -311,77 +357,73 @@ class LLMService:
         for comp_type, count in component_counts.items():
             component_overview.append(f"- {count} {comp_type}(s)")
         
-        # Create key elements description with asset info
-        elements_description = []
-        for element in key_elements[:10]:
-            desc = f"- {element['type']}"
-            if element.get('label'):
-                desc += f": {element['label']}"
-            if element.get('asset_url'):
-                desc += f" (asset: {element['asset_url']})"
-            if element.get('key_styles'):
-                styles = element['key_styles'][0] if element['key_styles'] else {}
-                if styles.get('selector'):
-                    desc += f" (styled as {styles['selector']})"
-            elements_description.append(desc)
-        
-        # Enhanced asset list with instructions
-        asset_list = []
+        # Enhanced asset instructions
         asset_instructions = []
+        has_images = False
+        has_svgs = False
+
+        
         
         if hasattr(dom_result, 'assets') and dom_result.assets:
-            for i, asset in enumerate(dom_result.assets[:15]):
+            for asset in dom_result.assets[:15]:
                 if hasattr(asset, 'url') and asset.url:
-                    asset_list.append(f"- {asset.asset_type}: {asset.url}")
                     if asset.asset_type == 'image':
-                        asset_instructions.append(f"Use <img src='{asset.url}' alt='{getattr(asset, 'alt_text', 'image')}' /> for images")
-                elif hasattr(asset, 'content') and asset.content:
-                    asset_list.append(f"- Inline {asset.asset_type}: {getattr(asset, 'alt_text', 'content')}")
-                    if asset.asset_type == 'svg':
-                        asset_instructions.append(f"Include inline SVG: {asset.content[:100]}...")
+                        has_images = True
+                        asset_instructions.append(f"REQUIRED: Include <img src='{asset.url}' alt='{getattr(asset, 'alt_text', 'image')}' class='max-w-full h-auto' />")
+                    elif asset.asset_type == 'svg':
+                        has_svgs = True
+                        asset_instructions.append(f"REQUIRED: Include SVG icon from URL: {asset.url}")
+                elif hasattr(asset, 'content') and asset.content and asset.asset_type == 'svg':
+                    has_svgs = True
+                    # Include first 200 chars of SVG content as example
+                    svg_preview = asset.content[:200] + ("..." if len(asset.content) > 200 else "")
+                    asset_instructions.append(f"REQUIRED: Include this inline SVG: {svg_preview}")
         
-        prompt = f"""You are an expert front-end developer. Create a single HTML file that replicates the structure and design of the website at {original_url}.
+        logger.info(f"Building prompt with {len(dom_result.assets)} assets available")
+        
+        prompt = f"""You are an expert front-end developer. Create a COMPLETE, FULLY-FUNCTIONAL HTML file that replicates {original_url}.
 
     **WEBSITE ANALYSIS:**
-    The website contains the following components:
-    {chr(10).join(component_overview)}
+    The website contains: {chr(10).join(component_overview)}
 
-    **KEY ELEMENTS DETECTED:**
-    {chr(10).join(elements_description)}
+    **CRITICAL ASSET REQUIREMENTS:**
+    {chr(10).join(asset_instructions) if asset_instructions else "- Create placeholder images and icons using CSS/SVG"}
+    {'- The site has ' + str(len([a for a in dom_result.assets if getattr(a, 'asset_type', '') == 'image'])) + ' images that MUST be included' if has_images else ''}
+    {'- The site has ' + str(len([a for a in dom_result.assets if getattr(a, 'asset_type', '') == 'svg'])) + ' SVG icons that MUST be included' if has_svgs else ''}
 
-    **ASSETS FOUND (MUST INCLUDE):**
-    {chr(10).join(asset_list) if asset_list else "- No external assets detected"}
-
-    **ASSET HANDLING INSTRUCTIONS:**
-    {chr(10).join(asset_instructions) if asset_instructions else "- Use placeholder images with proper alt text"}
-    - For missing images, use placeholder divs with background colors
-    - Preserve all SVG icons found in the original
-    - Include proper alt text for accessibility
-
-    **PAGE STRUCTURE:**
-    - Title: {getattr(dom_result.page_structure, 'title', 'Unknown') if hasattr(dom_result, 'page_structure') else 'Unknown'}
-    - Total depth: {summary.get('structure_depth', 'Unknown')} levels
-
-    **CRITICAL REQUIREMENTS:**
-    1. Create a complete HTML file with embedded CSS
-    2. **MUST include all images and SVGs found in the asset list above**
-    3. Use semantic HTML5 elements appropriate for each component type
-    4. Focus on recreating the visual layout and hierarchy
-    5. Ensure the design is responsive and modern
+    **MANDATORY REQUIREMENTS:**
+    1. Generate a COMPLETE HTML document from <!DOCTYPE html> to </html>
+    2. Include ALL assets found in the original site
+    3. Use embedded CSS within <style> tags in the <head>
+    4. Create a responsive, modern design
+    5. Include proper semantic HTML5 structure
     6. Quality level: {quality_level}
 
-    **ASSET INTEGRATION:**
-    - Include every image from the asset list using <img> tags
-    - Embed all inline SVGs directly in the HTML
-    - Use the exact URLs provided in the asset list
+    **STRUCTURE MUST INCLUDE:**
+    - Complete <!DOCTYPE html> declaration
+    - Full <html> tag with lang attribute
+    - Complete <head> section with meta tags, title, and embedded CSS
+    - Complete <body> with all content
+    - Proper closing </html> tag
+
+    **ASSET INTEGRATION RULES:**
+    - Every image MUST use an actual <img> tag with src attribute
+    - Every SVG MUST be included either inline or as <img> if external
+    - Use the exact URLs provided in the asset requirements above
     - Add proper alt attributes for accessibility
-    - Create colored placeholder divs for any missing assets
+    - Style images responsively with CSS classes
 
     **OUTPUT FORMAT:**
-    Generate ONLY the HTML file content with embedded CSS in <style> tags.
-    IMPORTANT: Make sure to include ALL images and SVGs from the asset list above.
+    Return ONLY the complete HTML file. Start with <!DOCTYPE html> and end with </html>.
+    DO NOT include markdown code blocks or any other formatting.
+    DO NOT truncate the output - provide the complete HTML file.
 
-    Generate the complete HTML file:"""
+    **IMPORTANT:** 
+    - The HTML must be complete and ready to save as a .html file
+    - Include every single asset mentioned in the requirements above
+    - End the response with the closing </html> tag
+
+    Generate the complete HTML file now:"""
 
         return prompt
 
@@ -477,10 +519,64 @@ Return only the HTML with embedded CSS."""
         return prompt
     
     def _parse_llm_response(self, response_text: str) -> tuple[str, Optional[str]]:
-        html_match = re.search(r"```html(.*?)```", response_text, re.DOTALL)
+        """Enhanced LLM response parsing with better HTML extraction."""
+        
+        # First, try to extract HTML from code blocks
+        html_match = re.search(r"```html\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
         if html_match:
-            return html_match.group(1).strip(), None
-        return response_text, None
+            html_content = html_match.group(1).strip()
+            
+            # Clean up common formatting issues
+            html_content = self._clean_html_content(html_content)
+            return html_content, None
+        
+        # Try without the 'html' specifier
+        code_block_match = re.search(r"```\s*(.*?)```", response_text, re.DOTALL)
+        if code_block_match:
+            html_content = code_block_match.group(1).strip()
+            # Check if it looks like HTML
+            if html_content.startswith('<!DOCTYPE') or html_content.startswith('<html'):
+                html_content = self._clean_html_content(html_content)
+                return html_content, None
+        
+        # Look for HTML document pattern in raw text
+        html_doc_match = re.search(r'<!DOCTYPE[^>]*>.*?</html>', response_text, re.DOTALL | re.IGNORECASE)
+        if html_doc_match:
+            html_content = html_doc_match.group(0)
+            html_content = self._clean_html_content(html_content)
+            return html_content, None
+        
+        # Fallback: return the whole response and let it be processed
+        return self._clean_html_content(response_text), None
+
+    def _clean_html_content(self, html_content: str) -> str:
+        """Clean and validate HTML content."""
+        
+        # Remove any leading/trailing whitespace
+        html_content = html_content.strip()
+        
+        # Remove any markdown artifacts
+        html_content = re.sub(r'^```html\s*', '', html_content, flags=re.IGNORECASE)
+        html_content = re.sub(r'^```\s*', '', html_content)
+        html_content = re.sub(r'```\s*$', '', html_content)
+        
+        # Ensure proper HTML structure
+        if not html_content.startswith('<!DOCTYPE'):
+            if html_content.startswith('<html'):
+                html_content = '<!DOCTYPE html>\n' + html_content
+            elif html_content.startswith('<head') or html_content.startswith('<body'):
+                html_content = f'<!DOCTYPE html>\n<html lang="en">\n{html_content}\n</html>'
+        
+        # Check if HTML is complete
+        if '<!DOCTYPE' in html_content and '<html' in html_content:
+            if not html_content.rstrip().endswith('</html>'):
+                # Try to close the HTML properly
+                if '</body>' in html_content:
+                    html_content = html_content.rstrip() + '\n</html>'
+                else:
+                    html_content = html_content.rstrip() + '\n</body>\n</html>'
+        
+        return html_content
 
     def _calculate_similarity_score(self, component_result, dom_result: DOMExtractionResult, generated_html: str) -> float:
         """

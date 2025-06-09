@@ -30,7 +30,9 @@ class AssetDownloaderService:
         tasks = []
         inline_assets = []
         
+        logger.info(f"Processing {len(assets)} assets for download/handling")
         for asset in assets:
+            logger.info(f"Asset: {asset.asset_type}, URL: {getattr(asset, 'url', 'None')}, Content: {bool(getattr(asset, 'content', None))}")
             if hasattr(asset, 'content') and asset.content:
                 # Handle inline SVGs
                 inline_assets.append(self._handle_inline_asset(asset))
