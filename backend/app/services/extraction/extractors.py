@@ -407,14 +407,17 @@ def get_dom_extractor_script() -> str:
         };
 
         // Start extraction
+        console.log('Starting enhanced asset extraction...');
         const allAssets = [];
         
         // Extract from stylesheets first
         const stylesheetAssets = extractAssetsFromStylesheets();
         allAssets.push(...stylesheetAssets);
+        console.log('Stylesheet assets found:', stylesheetAssets.length);
         
         // Then extract from DOM tree
         const blueprint = buildComponentTree(document.body, 0, allAssets);
+        console.log('DOM extraction completed. Total assets found:', allAssets.length);
         
         // Deduplicate assets
         const uniqueAssets = [];
@@ -434,9 +437,10 @@ def get_dom_extractor_script() -> str:
             assetTypes: [...new Set(uniqueAssets.map(a => a.asset_type))]
         });
         
+        // FIXED: Proper JavaScript object syntax with all required commas
         return { 
             blueprint: blueprint,
-            assets: uniqueAssets.slice(0, CONFIG.MAX_ASSETS), // Limit assets
+            assets: uniqueAssets.slice(0, CONFIG.MAX_ASSETS),
             metadata: {
                 total_components: componentCount,
                 total_assets: uniqueAssets.length,
@@ -444,7 +448,11 @@ def get_dom_extractor_script() -> str:
                 asset_types: [...new Set(uniqueAssets.map(a => a.asset_type))],
                 has_react: !!document.querySelector('[data-reactroot]'),
                 has_vue: !!window.Vue,
-                has_angular: !!window.ng
+                has_angular: !!window.ng,
+                debug_all_assets_count: allAssets.length,
+                debug_unique_assets_count: uniqueAssets.length,
+                debug_seen_urls_count: seenUrls.size,
+                debug_first_few_assets: allAssets.slice(0, 5)
             }
         };
     })();

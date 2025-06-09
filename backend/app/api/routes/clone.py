@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import datetime, UTC
 import logging
 import asyncio 
+import time
 
 from ...dependencies import (
     get_app_state, 
@@ -240,6 +241,7 @@ async def process_clone_request(
     """
     Enhanced cloning pipeline with better asset handling and modern web support.
     """
+    start_time = time.time()
     try:
         browser_manager = get_browser_manager()
         if not browser_manager._is_initialized:
@@ -353,9 +355,8 @@ async def process_clone_request(
                             "Integrating assets with modern web patterns...", 
                             CloneStatus.GENERATING, 55)
         
-        # Use enhanced HTML rewriter
-        from ..services.enhanced_html_rewriter_service import EnhancedHTMLRewriterService
-        rewriter = EnhancedHTMLRewriterService()
+       
+        rewriter = HTMLRewriterService()
         
         # Multi-pass asset integration
         logger.info("Starting multi-pass asset integration...")

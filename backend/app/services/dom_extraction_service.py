@@ -201,6 +201,49 @@ class DOMExtractionService:
                 # Use the enhanced extractor script
                 extraction_data = await page.evaluate(self._javascript_extractors["dom_extractor"])
                 
+                logger.info("=== DOM EXTRACTION DEBUG ===")
+                logger.info(f"Extraction data type: {type(extraction_data)}")
+                logger.info(f"Extraction data keys: {list(extraction_data.keys()) if isinstance(extraction_data, dict) else 'Not a dict'}")
+
+                if isinstance(extraction_data, dict):
+                    assets_data = extraction_data.get("assets", [])
+                    metadata = extraction_data.get("metadata", {})
+                    
+                    logger.info(f"Assets data type: {type(assets_data)}")
+                    logger.info(f"Assets length: {len(assets_data) if isinstance(assets_data, list) else 'Not a list'}")
+                    logger.info(f"Metadata: {metadata}")
+                    
+                    if isinstance(assets_data, list) and len(assets_data) > 0:
+                        logger.info(f"First asset: {assets_data[0]}")
+                        logger.info(f"Asset types found: {[asset.get('asset_type') for asset in assets_data[:5]]}")
+                    else:
+                        logger.warning("No assets found in extraction data!")
+                        
+                        # Check if there are actually images on the page
+                        image_check = await page.evaluate("""
+                            () => {
+                                const images = document.querySelectorAll('img, svg, [style*="background-image"]');
+                                const imageInfo = Array.from(images).slice(0, 10).map(img => ({
+                                    tag: img.tagName,
+                                    src: img.src || img.getAttribute('src') || 'no-src',
+                                    classes: Array.from(img.classList),
+                                    hasBackgroundImage: img.style.backgroundImage ? true : false
+                                }));
+                                
+                                return {
+                                    totalImages: images.length,
+                                    imageInfo: imageInfo,
+                                    bodyHtml: document.body.innerHTML.substring(0, 500)
+                                };
+                            }
+                        """)
+                        
+                        logger.info(f"Manual image check: {image_check}")
+                else:
+                    logger.error(f"Extraction data is not a dict: {extraction_data}")
+
+                logger.info("=== END DEBUG ===")
+
                 if not extraction_data:
                     raise ProcessingError("Blueprint extraction script returned no data.")
 
@@ -302,65 +345,6 @@ class DOMExtractionService:
                 success=False,
                 error_message=f"Blueprint extraction failed: {str(e)}"
             )
-
-
-
-async def _extract_page_structure(self, page, url: str) -> PageStructure:
-    """Enhanced page structure extraction."""
-    try:
-        # Extract comprehensive page metadata
-        page_data = await page.evaluate("""
-            () => {
-                const getMetaContent = (name) => {
-                    const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
-                    return meta ? meta.getAttribute('content') : null;
-                };
-                
-                return {
-                    title: document.title,
-                    description: getMetaContent('description'),
-                    keywords: getMetaContent('keywords'),
-                    lang: document.documentElement.lang,
-                    charset: document.characterSet,
-                    viewport: getMetaContent('viewport'),
-                    favicon: document.querySelector('link[rel*="icon"]')?.href,
-                    canonical: document.querySelector('link[rel="canonical"]')?.href,
-                    og_title: getMetaContent('og:title'),
-                    og_description: getMetaContent('og:description'),
-                    og_image: getMetaContent('og:image'),
-                    og_url: getMetaContent('og:url'),
-                    twitter_card: getMetaContent('twitter:card'),
-                    twitter_title: getMetaContent('twitter:title'),
-                    twitter_description: getMetaContent('twitter:description'),
-                    twitter_image: getMetaContent('twitter:image')
-                };
-            }
-        """)
-        
-        # Build Open Graph data
-        open_graph = {}
-        for key, value in page_data.items():
-            if key.startswith('og_') and value:
-                open_graph[key[3:]] = value
-            elif key.startswith('twitter_') and value:
-                open_graph[key] = value
-        
-        return PageStructure(
-            url=url,
-            title=page_data.get('title'),
-            meta_description=page_data.get('description'),
-            meta_keywords=page_data.get('keywords'),
-            lang=page_data.get('lang'),
-            charset=page_data.get('charset'),
-            viewport=page_data.get('viewport'),
-            favicon_url=page_data.get('favicon'),
-            canonical_url=page_data.get('canonical'),
-            open_graph=open_graph
-        )
-        
-    except Exception as e:
-        logger.warning(f"Failed to extract page structure: {e}")
-        return PageStructure(url=url, title="Unknown")
 
     async def save_extraction_result(self, result: DOMExtractionResult, output_format: str = "json") -> str:
         return await storage.save_extraction_result(result, output_format)

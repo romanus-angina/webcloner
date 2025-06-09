@@ -189,8 +189,19 @@ class LLMService:
         
         return html_content
 
-    async def generate_html_from_components(self, component_result, dom_result, original_url, quality_level="balanced") -> Dict[str, Any]:
+    async def generate_html_from_components(
+        self, 
+        component_result, 
+        dom_result, 
+        original_url, 
+        quality_level="balanced",
+        asset_context=None  # FIXED: Added this parameter
+    ) -> Dict[str, Any]:
         logger.info(f"Generating initial style-aware HTML for {original_url}")
+        
+        # Use asset_context if provided
+        if asset_context:
+            logger.info(f"Using asset context: {asset_context}")
         
         # Check if we need to simplify the blueprint
         if hasattr(component_result, 'model_dump'):
@@ -218,13 +229,13 @@ class LLMService:
             if component:
                 # Option 1: Use summary approach
                 summary = self._create_component_summary(component)
-                prompt = self._build_summary_prompt(summary, dom_result, quality_level, original_url)
+                prompt = self._build_summary_prompt(summary, dom_result, quality_level, original_url, asset_context)
             else:
                 # Option 2: Fallback to basic structure
-                prompt = self._build_fallback_prompt(dom_result, quality_level, original_url)
+                prompt = self._build_fallback_prompt(dom_result, quality_level, original_url, asset_context)
         else:
             # Original blueprint approach for smaller sites
-            prompt = self._build_generation_prompt(blueprint_dict, dom_result, quality_level, original_url)
+            prompt = self._build_generation_prompt(blueprint_dict, dom_result, quality_level, original_url, asset_context)
         
         # Double-check final prompt size
         final_estimated_tokens = self._estimate_tokens(prompt)
@@ -251,7 +262,7 @@ class LLMService:
             "tokens_used": api_response["usage"].input_tokens + api_response["usage"].output_tokens
         }
     
-    async def analyze_visual_differences(self, original_image_path: str, generated_image_path: str) -> str:
+    async def analyze_visual_differences(self, original_image_path: str, generated_image_path: str, asset_context=None) -> str:
         logger.info("Performing VQA to analyze visual differences.")
         
         # Resize images if they're too large for Claude's API
@@ -289,10 +300,22 @@ class LLMService:
                 image_resizer_service.cleanup_resized_image(resized_generated)
             raise ProcessingError(f"Failed to read/resize images for VQA: {e}")
 
-        prompt = """You are a meticulous front-end QA engineer. Compare the two screenshots provided.
+        # Enhanced prompt with asset context
+        base_prompt = """You are a meticulous front-end QA engineer. Compare the two screenshots provided.
         - The first image is the 'Original' website.
         - The second image is the 'Generated' clone.
         Identify the top 3-5 most significant visual discrepancies. Be specific about colors, fonts, spacing, alignment, and missing elements. Provide your feedback as a concise, actionable list."""
+        
+        if asset_context:
+            asset_info = f"\n\nAsset Context: The original site has {asset_context.get('total_assets', 0)} assets including:"
+            if asset_context.get('has_logos'):
+                asset_info += " logos,"
+            if asset_context.get('has_icons'):
+                asset_info += " icons,"
+            if asset_context.get('has_backgrounds'):
+                asset_info += " background images,"
+            asset_info = asset_info.rstrip(',') + ". Pay special attention to missing or incorrectly placed assets."
+            base_prompt += asset_info
         
         messages = [
             {
@@ -300,7 +323,7 @@ class LLMService:
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": original_image_data}},
                     {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": generated_image_data}},
-                    {"type": "text", "text": prompt}
+                    {"type": "text", "text": base_prompt}
                 ],
             }
         ]
@@ -317,12 +340,18 @@ class LLMService:
             if resized_generated:
                 image_resizer_service.cleanup_resized_image(resized_generated)
 
-    async def refine_html_with_feedback(self, original_html: str, feedback: str) -> str:
+    async def refine_html_with_feedback(
+        self, 
+        original_html: str, 
+        feedback: str,
+        asset_map=None,  # FIXED: Added this parameter
+        asset_context=None  # FIXED: Added this parameter
+    ) -> str:
         logger.info("Refining HTML based on VQA feedback.")
         
         formatted_feedback = "- " + "\n- ".join(feedback.strip().splitlines())
 
-        prompt = f"""You are an expert front-end developer. You have generated an HTML file, but a QA review found some visual discrepancies.
+        base_prompt = f"""You are an expert front-end developer. You have generated an HTML file, but a QA review found some visual discrepancies.
         Your task is to fix the provided HTML code to address the feedback.
 
 **Original HTML Code:**
@@ -337,16 +366,39 @@ class LLMService:
 1. Carefully analyze the feedback.
 2. Modify the HTML and embedded CSS to correct all the listed issues.
 3. Ensure your output is a single, complete, and valid HTML file.
-4. Do not add new features; only correct the existing code to match the original design intent described in the feedback.
+4. Do not add new features; only correct the existing code to match the original design intent described in the feedback."""
 
-**Return only the full, corrected HTML code inside a single ```html block.**"""
+        # Add asset-specific instructions if available
+        if asset_map:
+            asset_instructions = "\n\n**Available Assets:**\n"
+            for original_url, local_path in list(asset_map.items())[:10]:  # Limit to first 10
+                asset_instructions += f"- {original_url} -> {local_path}\n"
+            asset_instructions += "\nEnsure all these assets are properly used in the HTML."
+            base_prompt += asset_instructions
+
+        if asset_context:
+            context_info = f"\n\n**Asset Context:** The site should have {asset_context.get('total_assets', 0)} assets. "
+            if asset_context.get('has_logos'):
+                context_info += "Include logos prominently. "
+            if asset_context.get('has_icons'):
+                context_info += "Include icons where appropriate. "
+            base_prompt += context_info
+
+        base_prompt += "\n\n**Return only the full, corrected HTML code inside a single ```html block.**"
         
-        messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": base_prompt}]
         response = await self._make_request_with_retry(messages)
         refined_html, _ = self._parse_llm_response(response["content"])
         return refined_html
 
-    def _build_summary_prompt(self, summary: Dict[str, Any], dom_result: DOMExtractionResult, quality_level: str, original_url: str) -> str:
+    def _build_summary_prompt(
+        self, 
+        summary: Dict[str, Any], 
+        dom_result: DOMExtractionResult, 
+        quality_level: str, 
+        original_url: str, 
+        asset_context=None  # FIXED: Added this parameter
+    ) -> str:
         """Enhanced prompt that ensures complete HTML output with all assets."""
         
         component_counts = summary.get("component_counts", {})
@@ -361,8 +413,6 @@ class LLMService:
         asset_instructions = []
         has_images = False
         has_svgs = False
-
-        
         
         if hasattr(dom_result, 'assets') and dom_result.assets:
             for asset in dom_result.assets[:15]:
@@ -378,6 +428,20 @@ class LLMService:
                     # Include first 200 chars of SVG content as example
                     svg_preview = asset.content[:200] + ("..." if len(asset.content) > 200 else "")
                     asset_instructions.append(f"REQUIRED: Include this inline SVG: {svg_preview}")
+        
+        # Add asset context information
+        if asset_context:
+            context_instructions = []
+            if asset_context.get('has_logos'):
+                context_instructions.append("- CRITICAL: Include logos prominently in header/navigation")
+            if asset_context.get('has_icons'):
+                context_instructions.append("- CRITICAL: Include icons throughout the interface")
+            if asset_context.get('has_backgrounds'):
+                context_instructions.append("- CRITICAL: Include background images as specified")
+            if asset_context.get('total_assets', 0) > 0:
+                context_instructions.append(f"- TOTAL: Ensure all {asset_context['total_assets']} assets are integrated")
+            
+            asset_instructions.extend(context_instructions)
         
         logger.info(f"Building prompt with {len(dom_result.assets)} assets available")
         
@@ -427,13 +491,18 @@ class LLMService:
 
         return prompt
 
-
-    def _build_fallback_prompt(self, dom_result: DOMExtractionResult, quality_level: str, original_url: str) -> str:
+    def _build_fallback_prompt(
+        self, 
+        dom_result: DOMExtractionResult, 
+        quality_level: str, 
+        original_url: str, 
+        asset_context=None  # FIXED: Added this parameter
+    ) -> str:
         """Fallback prompt when component detection fails."""
         
         page_title = getattr(dom_result.page_structure, 'title', 'Website Clone') if hasattr(dom_result, 'page_structure') else 'Website Clone'
         
-        prompt = f"""You are an expert front-end developer. Create a modern, responsive website inspired by {original_url}.
+        base_prompt = f"""You are an expert front-end developer. Create a modern, responsive website inspired by {original_url}.
 
 **TARGET INFORMATION:**
 - Page Title: {page_title}
@@ -452,14 +521,18 @@ class LLMService:
 - Hero/banner section
 - Main content area
 - Footer
-- Responsive design for all screen sizes
+- Responsive design for all screen sizes"""
 
-**OUTPUT FORMAT:**
-Return only the complete HTML file with embedded CSS in <style> tags.
+        if asset_context and asset_context.get('total_assets', 0) > 0:
+            base_prompt += f"\n\n**ASSET REQUIREMENTS:**\n- Include {asset_context['total_assets']} assets as placeholders"
+            if asset_context.get('has_logos'):
+                base_prompt += "\n- Include logo in header"
+            if asset_context.get('has_icons'):
+                base_prompt += "\n- Include icons throughout interface"
 
-Generate the HTML file:"""
+        base_prompt += "\n\n**OUTPUT FORMAT:**\nReturn only the complete HTML file with embedded CSS in <style> tags.\n\nGenerate the HTML file:"
 
-        return prompt
+        return base_prompt
 
     def _build_minimal_prompt(self, original_url: str, quality_level: str) -> str:
         """Minimal prompt as last resort."""
@@ -473,7 +546,14 @@ Generate the HTML file:"""
 Quality: {quality_level}
 Return only the HTML with embedded CSS."""
 
-    def _build_generation_prompt(self, component_result, dom_result: DOMExtractionResult, quality_level: str, original_url: str) -> str:
+    def _build_generation_prompt(
+        self, 
+        component_result, 
+        dom_result: DOMExtractionResult, 
+        quality_level: str, 
+        original_url: str, 
+        asset_context=None  # FIXED: Added this parameter
+    ) -> str:
         """Original blueprint-based prompt with enhanced asset instructions."""
         json_blueprint = json.dumps(component_result, indent=2)
         
@@ -484,7 +564,7 @@ Return only the HTML with embedded CSS."""
             asset_count = len(dom_result.assets)
             svg_count = len([a for a in dom_result.assets if getattr(a, 'asset_type', '') == 'svg'])
         
-        prompt = f"""SYSTEM: You are an expert front-end developer. Your task is to construct a single, self-contained HTML file by precisely assembling the components provided in a JSON data structure.
+        base_prompt = f"""SYSTEM: You are an expert front-end developer. Your task is to construct a single, self-contained HTML file by precisely assembling the components provided in a JSON data structure.
 
     USER:
     You are provided with a JSON object that represents the complete blueprint for a webpage from {original_url}. 
@@ -503,7 +583,20 @@ Return only the HTML with embedded CSS."""
     - Every component with an `asset_url` MUST result in a visible asset in the final HTML
     - SVG components MUST include their complete SVG markup
     - Image components MUST include proper <img> tags with src attributes
-    - Preserve all visual assets to maintain design fidelity
+    - Preserve all visual assets to maintain design fidelity"""
+
+        # Add asset context information
+        if asset_context:
+            context_info = f"\n\n**ASSET CONTEXT:**\n- Total assets to integrate: {asset_context.get('total_assets', 0)}\n"
+            if asset_context.get('has_logos'):
+                context_info += "- Include logos prominently\n"
+            if asset_context.get('has_icons'):
+                context_info += "- Include icons throughout interface\n"
+            if asset_context.get('has_backgrounds'):
+                context_info += "- Include background images\n"
+            base_prompt += context_info
+
+        base_prompt += f"""
 
     Here is the JSON blueprint for the webpage:
 
@@ -516,7 +609,7 @@ Return only the HTML with embedded CSS."""
     CRITICAL: Ensure ALL assets (images, SVGs, icons) from the blueprint are included in the final HTML.
     The generated page should visually match the original with all logos, icons, and images present."""
 
-        return prompt
+        return base_prompt
     
     def _parse_llm_response(self, response_text: str) -> tuple[str, Optional[str]]:
         """Enhanced LLM response parsing with better HTML extraction."""
@@ -558,7 +651,7 @@ Return only the HTML with embedded CSS."""
         # Remove any markdown artifacts
         html_content = re.sub(r'^```html\s*', '', html_content, flags=re.IGNORECASE)
         html_content = re.sub(r'^```\s*', '', html_content)
-        html_content = re.sub(r'```\s*$', '', html_content)
+        html_content = re.sub(r'```\s*', '', html_content)
         
         # Ensure proper HTML structure
         if not html_content.startswith('<!DOCTYPE'):
