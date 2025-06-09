@@ -135,14 +135,11 @@ class LLMService:
         original_url: str,
         quality_level: str = "balanced"
     ) -> Dict[str, Any]:
-        """
-        Generate HTML based on detected components and DOM structure.
-        Enhanced with retry logic for better reliability.
-        """
-        logger.info(f"Generating HTML for {original_url} with {component_result.total_components} components")
+        """Generate HTML with enhanced style awareness."""
+        logger.info(f"Generating enhanced HTML for {original_url} with {component_result.total_components} components")
         
         try:
-            # Build component-aware prompt
+            # Build enhanced prompt with style data
             prompt = self._build_generation_prompt(
                 component_result, dom_result, original_url, quality_level
             )
@@ -157,28 +154,32 @@ class LLMService:
             # Extract HTML and CSS from response
             html_content, css_content = self._parse_llm_response(generated_content)
             
-            # Calculate metrics
-            similarity_score = self._calculate_similarity_score(component_result, html_content)
+            # Enhanced similarity scoring with style awareness
+            similarity_score = self._calculate_similarity_score(
+                component_result, dom_result, html_content
+            )
             
             result = {
                 "html_content": html_content,
                 "css_content": css_content,
                 "similarity_score": similarity_score,
-                "generation_time": 0.0,  # Will be set by caller
+                "generation_time": 0.0,
                 "tokens_used": usage.input_tokens + usage.output_tokens,
                 "components_replicated": self._count_replicated_components(component_result, html_content),
                 "quality_level": quality_level,
-                "model_used": "claude-3-5-sonnet-20241022"
+                "model_used": "claude-3-5-sonnet-20241022",
+                "style_analysis_used": True
             }
             
-            logger.info(f"HTML generation completed: {similarity_score:.1f}% similarity, {result['tokens_used']} tokens")
+            logger.info(f"Enhanced HTML generation completed: {similarity_score:.1f}% similarity")
             
             return result
             
         except Exception as e:
-            logger.error(f"LLM HTML generation failed: {str(e)}")
+            logger.error(f"Enhanced HTML generation failed: {str(e)}")
             raise LLMError(f"HTML generation failed: {str(e)}", provider="anthropic")
     
+
     def _build_generation_prompt(
         self,
         component_result: ComponentDetectionResult,
@@ -186,78 +187,157 @@ class LLMService:
         original_url: str,
         quality_level: str
     ) -> str:
-        """Build a component-aware prompt for HTML generation."""
+        """Build an enhanced prompt with comprehensive style information."""
         
-        # Component summary
+        # Extract style analysis from DOM result
+        layout_analysis = dom_result.layout_analysis
+        theme_colors = layout_analysis.get("theme_colors", {})
+        typography = layout_analysis.get("typography", {})
+        css_variables = layout_analysis.get("css_variables", {})
+        visual_hierarchy = layout_analysis.get("visual_hierarchy", [])
+        
+        # Build component summary
         component_summary = self._build_component_summary(component_result)
         
-        # Page structure summary
+        # Build style summary
+        style_summary = self._build_style_summary(theme_colors, typography, css_variables, visual_hierarchy)
+        
+        # Page info
         page_info = {
             "title": dom_result.page_structure.title or "Cloned Website",
             "description": dom_result.page_structure.meta_description or "",
-            "color_palette": dom_result.color_palette[:10],  # Top 10 colors
-            "font_families": dom_result.font_families[:5],   # Top 5 fonts
-            "total_elements": dom_result.total_elements
+            "total_elements": dom_result.total_elements,
+            "is_dark_theme": theme_colors.get("is_dark_theme", False)
         }
         
-        # Quality-specific instructions
+        # Quality instructions
         quality_instructions = self._get_quality_instructions(quality_level)
         
-        prompt = f"""You are an expert web developer tasked with creating a visually similar HTML replica of a website.
+        prompt = f"""You are an expert web developer tasked with creating a visually identical HTML replica of a website.
 
-ORIGINAL WEBSITE: {original_url}
+    ORIGINAL WEBSITE: {original_url}
 
-PAGE ANALYSIS:
-- Title: {page_info['title']}
-- Description: {page_info['description']}
-- Total Elements: {page_info['total_elements']}
-- Color Palette: {', '.join(page_info['color_palette']) if page_info['color_palette'] else 'Not detected'}
-- Font Families: {', '.join(page_info['font_families']) if page_info['font_families'] else 'Not detected'}
+    PAGE ANALYSIS:
+    - Title: {page_info['title']}
+    - Description: {page_info['description']}
+    - Total Elements: {page_info['total_elements']}
+    - Theme: {"Dark" if page_info['is_dark_theme'] else "Light"} theme detected
 
-DETECTED COMPONENTS ({component_result.total_components} total):
-{component_summary}
+    VISUAL STYLE ANALYSIS:
+    {style_summary}
 
-{quality_instructions}
+    DETECTED COMPONENTS ({component_result.total_components} total):
+    {component_summary}
 
-REQUIREMENTS:
-1. Generate complete, valid HTML5 with embedded CSS
-2. Preserve the component structure and hierarchy detected above
-3. Use semantic HTML elements that match the component types
-4. Create responsive design with modern CSS (flexbox/grid where appropriate)
-5. Ensure all interactive elements (buttons, forms, links) are functional
-6. Match the color palette and typography where possible
-7. Include proper meta tags and document structure
+    {quality_instructions}
 
-OUTPUT FORMAT:
-Provide your response with the HTML first, followed by additional CSS if needed:
+    CRITICAL STYLE REQUIREMENTS:
+    1. **Theme Matching**: {"Use dark backgrounds and light text" if page_info['is_dark_theme'] else "Use light backgrounds and dark text"}
+    2. **Color Accuracy**: Match the exact background colors, text colors, and accent colors
+    3. **Typography**: Use the same font families, sizes, and weights
+    4. **Spacing**: Apply the same margin/padding patterns
+    5. **Visual Hierarchy**: Maintain the same element prominence and sizing
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{page_info['title']}</title>
-    <style>
-        /* Embedded CSS here */
-    </style>
-</head>
-<body>
-    <!-- Generated HTML structure here -->
-</body>
-</html>
-```
+    IMPLEMENTATION REQUIREMENTS:
+    1. Generate complete, valid HTML5 with embedded CSS
+    2. Use semantic HTML elements that match the component types
+    3. Apply modern CSS (flexbox/grid) for layout
+    4. Ensure responsive design
+    5. Include hover states and interactive elements
+    6. Match visual spacing and proportions exactly
 
-If you need additional CSS beyond the embedded styles, provide it after the HTML block:
+    OUTPUT FORMAT:
+    ```html
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{page_info['title']}</title>
+        <style>
+            /* Critical: Apply the theme colors and typography first */
+            :root {{
+                {self._generate_css_variables(css_variables, theme_colors)}
+            }}
+            
+            /* Your complete CSS here */
+        </style>
+    </head>
+    <body>
+        <!-- Your HTML structure here -->
+    </body>
+    </html>
+    ```
 
-```css
-/* Additional CSS if needed */
-```
-
-Focus on creating a professional, visually appealing website that captures the essence and functionality of the original."""
+    Focus on perfect visual replication - the clone should be nearly indistinguishable from the original."""
 
         return prompt
     
+    def _build_style_summary(self, theme_colors: dict, typography: dict, css_variables: dict, visual_hierarchy: list) -> str:
+        """Build a comprehensive style summary for the prompt."""
+        summary_parts = []
+        
+        # Theme colors
+        if theme_colors:
+            summary_parts.append("THEME COLORS:")
+            if theme_colors.get("primary_background"):
+                summary_parts.append(f"- Primary Background: {theme_colors['primary_background']}")
+            if theme_colors.get("primary_text"):
+                summary_parts.append(f"- Primary Text: {theme_colors['primary_text']}")
+            if theme_colors.get("is_dark_theme"):
+                summary_parts.append("- Dark theme detected - use dark backgrounds!")
+            summary_parts.append("")
+        
+        # Typography
+        if typography:
+            summary_parts.append("TYPOGRAPHY:")
+            body_text = typography.get("body_text", {})
+            if body_text:
+                summary_parts.append(f"- Body Font: {body_text.get('font_family', 'N/A')}")
+                summary_parts.append(f"- Body Size: {body_text.get('font_size', 'N/A')}")
+                summary_parts.append(f"- Body Color: {body_text.get('color', 'N/A')}")
+            
+            headings = typography.get("headings", {})
+            for tag, styles in headings.items():
+                if styles:
+                    summary_parts.append(f"- {tag.upper()}: {styles.get('font_size', 'N/A')} {styles.get('font_weight', 'N/A')}")
+            summary_parts.append("")
+        
+        # CSS Variables (if any)
+        if css_variables:
+            summary_parts.append("CSS VARIABLES:")
+            for var, value in list(css_variables.items())[:10]:  # Limit to first 10
+                summary_parts.append(f"- {var}: {value}")
+            summary_parts.append("")
+        
+        # Visual hierarchy (key elements)
+        if visual_hierarchy:
+            summary_parts.append("KEY VISUAL ELEMENTS:")
+            for item in visual_hierarchy[:5]:  # Top 5 most important
+                element_type = item.get("element_type", "unknown")
+                text = item.get("text_content", "")[:50]  # First 50 chars
+                styles = item.get("styles", {})
+                summary_parts.append(f"- {element_type}: '{text}' - {styles.get('font_size', 'N/A')} {styles.get('color', 'N/A')}")
+            summary_parts.append("")
+        
+        return "\n".join(summary_parts)
+    
+    def _generate_css_variables(self, css_variables: dict, theme_colors: dict) -> str:
+        """Generate CSS custom properties for the theme."""
+        variables = []
+        
+        # Add theme color variables
+        if theme_colors.get("primary_background"):
+            variables.append(f"--primary-bg: {theme_colors['primary_background']};")
+        if theme_colors.get("primary_text"):
+            variables.append(f"--primary-text: {theme_colors['primary_text']};")
+        
+        # Add any existing CSS variables
+        for var, value in list(css_variables.items())[:15]:  # Limit to prevent prompt bloat
+            variables.append(f"{var}: {value};")
+        
+        return "\n            ".join(variables)
+
     def _build_component_summary(self, component_result: ComponentDetectionResult) -> str:
         """Build a detailed summary of detected components for the prompt."""
         if not component_result.components:
@@ -349,7 +429,7 @@ QUALITY LEVEL: HIGH
         
         return html_content, css_content
     
-    def _calculate_similarity_score(self, component_result: ComponentDetectionResult, generated_html: str) -> float:
+    def _calculate_similarity_score(self, component_result: ComponentDetectionResult, dom_result: DOMExtractionResult, generated_html: str) -> float:
         """Calculate a rough similarity score based on component presence."""
         if not component_result.components:
             return 75.0  # Default score for pages without detected components

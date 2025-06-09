@@ -74,6 +74,8 @@ class ExtractedStylesheetModel(BaseModel):
     rules: List[Dict[str, Any]] = Field(default_factory=list, description="CSS rules")
     inline: bool = Field(default=False, description="Whether stylesheet is inline")
     content: Optional[str] = Field(None, description="Raw stylesheet content")
+    
+
 
 
 class ExtractedAssetModel(BaseModel):

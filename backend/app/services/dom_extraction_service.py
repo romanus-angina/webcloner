@@ -52,6 +52,8 @@ class ExtractedStylesheet:
     rules: List[Dict[str, Any]] = None
     inline: bool = False
     content: Optional[str] = None
+    critical: bool = False
+    cors_blocked: bool = False
     
     def __post_init__(self):
         if self.rules is None:
@@ -468,144 +470,301 @@ class DOMExtractionService:
         """
 
     def _get_style_extractor_script(self) -> str:
-        """Enhanced stylesheet extraction that captures more CSS rules."""
+        """Comprehensive CSS and style extraction that captures actual visual styling."""
         return """
         (() => {
-            function extractEnhancedStylesheets() {
-                const stylesheets = [];
+            function extractComprehensiveStyles() {
+                const result = {
+                    stylesheets: [],
+                    computed_styles: {},
+                    css_variables: {},
+                    theme_colors: {},
+                    typography: {},
+                    layout_patterns: {},
+                    visual_hierarchy: []
+                };
                 
-                // Extract external stylesheets with better rule access
-                const linkElements = document.querySelectorAll('link[rel="stylesheet"]');
-                for (let link of linkElements) {
-                    try {
+                // 1. Extract CSS Variables (CSS Custom Properties)
+                function extractCSSVariables() {
+                    const variables = {};
+                    const rootStyles = getComputedStyle(document.documentElement);
+                    
+                    // Get all CSS custom properties from :root
+                    for (let i = 0; i < rootStyles.length; i++) {
+                        const property = rootStyles[i];
+                        if (property.startsWith('--')) {
+                            variables[property] = rootStyles.getPropertyValue(property).trim();
+                        }
+                    }
+                    
+                    return variables;
+                }
+                
+                // 2. Analyze Theme Colors (backgrounds, text, etc.)
+                function analyzeThemeColors() {
+                    const theme = {
+                        primary_background: null,
+                        secondary_background: null,
+                        primary_text: null,
+                        secondary_text: null,
+                        accent_colors: [],
+                        is_dark_theme: false
+                    };
+                    
+                    // Analyze body/html background
+                    const bodyStyle = getComputedStyle(document.body);
+                    const htmlStyle = getComputedStyle(document.documentElement);
+                    
+                    theme.primary_background = bodyStyle.backgroundColor || htmlStyle.backgroundColor;
+                    theme.primary_text = bodyStyle.color;
+                    
+                    // Detect dark theme
+                    const bgColor = theme.primary_background;
+                    if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)') {
+                        // Convert to RGB and check brightness
+                        const rgbMatch = bgColor.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+                        if (rgbMatch) {
+                            const [_, r, g, b] = rgbMatch.map(Number);
+                            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                            theme.is_dark_theme = brightness < 128;
+                        }
+                    }
+                    
+                    return theme;
+                }
+                
+                // 3. Extract Typography Patterns
+                function extractTypography() {
+                    const typography = {
+                        headings: {},
+                        body_text: {},
+                        font_families: new Set(),
+                        font_weights: new Set(),
+                        font_sizes: new Set()
+                    };
+                    
+                    // Analyze headings
+                    ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].forEach(tag => {
+                        const elements = document.querySelectorAll(tag);
+                        if (elements.length > 0) {
+                            const firstElement = elements[0];
+                            const style = getComputedStyle(firstElement);
+                            typography.headings[tag] = {
+                                font_family: style.fontFamily,
+                                font_size: style.fontSize,
+                                font_weight: style.fontWeight,
+                                line_height: style.lineHeight,
+                                color: style.color,
+                                margin: style.margin,
+                                text_transform: style.textTransform
+                            };
+                            
+                            typography.font_families.add(style.fontFamily);
+                            typography.font_weights.add(style.fontWeight);
+                            typography.font_sizes.add(style.fontSize);
+                        }
+                    });
+                    
+                    // Analyze body text
+                    const bodyStyle = getComputedStyle(document.body);
+                    typography.body_text = {
+                        font_family: bodyStyle.fontFamily,
+                        font_size: bodyStyle.fontSize,
+                        font_weight: bodyStyle.fontWeight,
+                        line_height: bodyStyle.lineHeight,
+                        color: bodyStyle.color
+                    };
+                    
+                    // Convert Sets to Arrays
+                    typography.font_families = Array.from(typography.font_families);
+                    typography.font_weights = Array.from(typography.font_weights);
+                    typography.font_sizes = Array.from(typography.font_sizes);
+                    
+                    return typography;
+                }
+                
+                // 4. Extract Layout Patterns
+                function extractLayoutPatterns() {
+                    const patterns = {
+                        containers: [],
+                        spacing_scale: new Set(),
+                        border_radius_scale: new Set(),
+                        shadow_patterns: new Set(),
+                        grid_systems: [],
+                        flex_patterns: []
+                    };
+                    
+                    // Find container elements
+                    const containers = document.querySelectorAll('[class*="container"], [class*="wrapper"], [class*="content"]');
+                    containers.forEach(container => {
+                        const style = getComputedStyle(container);
+                        patterns.containers.push({
+                            max_width: style.maxWidth,
+                            padding: style.padding,
+                            margin: style.margin
+                        });
+                    });
+                    
+                    // Extract spacing patterns
+                    const allElements = document.querySelectorAll('*');
+                    for (let i = 0; i < Math.min(allElements.length, 200); i++) {
+                        const element = allElements[i];
+                        const style = getComputedStyle(element);
+                        
+                        // Collect spacing values
+                        [style.margin, style.padding].forEach(value => {
+                            if (value && value !== '0px') {
+                                patterns.spacing_scale.add(value);
+                            }
+                        });
+                        
+                        // Collect border radius
+                        if (style.borderRadius && style.borderRadius !== '0px') {
+                            patterns.border_radius_scale.add(style.borderRadius);
+                        }
+                        
+                        // Collect box shadows
+                        if (style.boxShadow && style.boxShadow !== 'none') {
+                            patterns.shadow_patterns.add(style.boxShadow);
+                        }
+                        
+                        // Detect grid/flex usage
+                        if (style.display === 'grid') {
+                            patterns.grid_systems.push({
+                                grid_template_columns: style.gridTemplateColumns,
+                                grid_gap: style.gridGap || style.gap
+                            });
+                        } else if (style.display === 'flex') {
+                            patterns.flex_patterns.push({
+                                flex_direction: style.flexDirection,
+                                justify_content: style.justifyContent,
+                                align_items: style.alignItems,
+                                gap: style.gap
+                            });
+                        }
+                    }
+                    
+                    // Convert Sets to Arrays
+                    patterns.spacing_scale = Array.from(patterns.spacing_scale);
+                    patterns.border_radius_scale = Array.from(patterns.border_radius_scale);
+                    patterns.shadow_patterns = Array.from(patterns.shadow_patterns);
+                    
+                    return patterns;
+                }
+                
+                // 5. Extract Visual Hierarchy
+                function extractVisualHierarchy() {
+                    const hierarchy = [];
+                    
+                    // Find visually prominent elements
+                    const prominentSelectors = [
+                        'h1', 'h2', 'h3', 
+                        '[class*="hero"]', '[class*="banner"]', '[class*="header"]',
+                        '[class*="title"]', '[class*="heading"]',
+                        'button', '[role="button"]', 'a[class*="btn"]'
+                    ];
+                    
+                    prominentSelectors.forEach(selector => {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach((element, index) => {
+                            if (index < 5) { // Limit to first 5 of each type
+                                const style = getComputedStyle(element);
+                                const rect = element.getBoundingClientRect();
+                                
+                                if (rect.width > 0 && rect.height > 0) {
+                                    hierarchy.push({
+                                        element_type: selector,
+                                        text_content: element.textContent?.slice(0, 100) || '',
+                                        styles: {
+                                            font_size: style.fontSize,
+                                            font_weight: style.fontWeight,
+                                            color: style.color,
+                                            background_color: style.backgroundColor,
+                                            border: style.border,
+                                            border_radius: style.borderRadius,
+                                            padding: style.padding,
+                                            margin: style.margin,
+                                            box_shadow: style.boxShadow,
+                                            display: style.display,
+                                            position: style.position
+                                        },
+                                        dimensions: {
+                                            width: rect.width,
+                                            height: rect.height
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    });
+                    
+                    return hierarchy;
+                }
+                
+                // 6. Enhanced Stylesheet Extraction
+                function extractStylesheets() {
+                    const stylesheets = [];
+                    
+                    // External stylesheets
+                    document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
                         const stylesheet = {
                             href: link.href,
                             media: link.media || 'all',
                             inline: false,
                             rules: [],
-                            content: null
+                            critical: link.href.includes('fonts') || link.media === 'all'
                         };
                         
-                        // Try to access CSS rules
                         try {
-                            if (link.sheet && link.sheet.cssRules) {
-                                for (let rule of link.sheet.cssRules) {
+                            if (link.sheet?.cssRules) {
+                                Array.from(link.sheet.cssRules).forEach(rule => {
                                     if (rule.type === CSSRule.STYLE_RULE) {
                                         stylesheet.rules.push({
                                             selector: rule.selectorText,
                                             styles: rule.style.cssText,
-                                            specificity: calculateSpecificity(rule.selectorText)
-                                        });
-                                    } else if (rule.type === CSSRule.MEDIA_RULE) {
-                                        // Extract media query rules
-                                        stylesheet.rules.push({
-                                            selector: `@media ${rule.media.mediaText}`,
-                                            styles: Array.from(rule.cssRules).map(r => r.cssText).join('\\n'),
-                                            specificity: 0,
-                                            media: rule.media.mediaText
-                                        });
-                                    } else if (rule.type === CSSRule.KEYFRAMES_RULE) {
-                                        // Extract keyframe animations
-                                        stylesheet.rules.push({
-                                            selector: `@keyframes ${rule.name}`,
-                                            styles: rule.cssText,
-                                            specificity: 0,
-                                            animation: rule.name
+                                            important: rule.style.cssText.includes('!important')
                                         });
                                     }
-                                }
+                                });
                             }
                         } catch (e) {
-                            // For CORS-blocked stylesheets, still record them
-                            stylesheet.rules.push({
-                                selector: '/* External stylesheet - CORS blocked */',
-                                styles: `/* ${link.href} */`,
-                                specificity: 0
-                            });
+                            // CORS blocked - still record the stylesheet
+                            stylesheet.cors_blocked = true;
                         }
                         
                         stylesheets.push(stylesheet);
-                    } catch (e) {
-                        console.warn('Error processing external stylesheet:', e);
-                    }
-                }
-                
-                // Extract inline styles with enhanced processing
-                const styleElements = document.querySelectorAll('style');
-                for (let style of styleElements) {
-                    try {
-                        const stylesheet = {
+                    });
+                    
+                    // Inline styles
+                    document.querySelectorAll('style').forEach(style => {
+                        stylesheets.push({
                             href: null,
                             media: style.media || 'all',
                             inline: true,
                             content: style.textContent,
-                            rules: []
-                        };
-                        
-                        if (style.sheet && style.sheet.cssRules) {
-                            for (let rule of style.sheet.cssRules) {
-                                try {
-                                    if (rule.type === CSSRule.STYLE_RULE) {
-                                        stylesheet.rules.push({
-                                            selector: rule.selectorText,
-                                            styles: rule.style.cssText,
-                                            specificity: calculateSpecificity(rule.selectorText)
-                                        });
-                                    } else if (rule.type === CSSRule.MEDIA_RULE) {
-                                        stylesheet.rules.push({
-                                            selector: `@media ${rule.media.mediaText}`,
-                                            styles: Array.from(rule.cssRules).map(r => r.cssText).join('\\n'),
-                                            specificity: 0,
-                                            media: rule.media.mediaText
-                                        });
-                                    }
-                                } catch (e) {
-                                    // Skip invalid rules
-                                    continue;
-                                }
-                            }
-                        }
-                        
-                        stylesheets.push(stylesheet);
-                    } catch (e) {
-                        console.warn('Error processing inline stylesheet:', e);
-                    }
+                            rules: [],
+                            critical: true
+                        });
+                    });
+                    
+                    return stylesheets;
                 }
                 
-                // Enhanced specificity calculation
-                function calculateSpecificity(selector) {
-                    if (!selector) return 0;
-                    
-                    let specificity = 0;
-                    
-                    // Count IDs
-                    const ids = (selector.match(/#[a-zA-Z0-9_-]+/g) || []).length;
-                    specificity += ids * 100;
-                    
-                    // Count classes, attributes, and pseudo-classes
-                    const classes = (selector.match(/\\.[a-zA-Z0-9_-]+/g) || []).length;
-                    const attributes = (selector.match(/\\[[^\\]]+\\]/g) || []).length;
-                    const pseudoClasses = (selector.match(/:[a-zA-Z0-9_-]+(?:\\([^)]*\\))?/g) || []).length;
-                    specificity += (classes + attributes + pseudoClasses) * 10;
-                    
-                    // Count elements and pseudo-elements
-                    const elements = (selector.match(/^[a-zA-Z0-9]+|\\s[a-zA-Z0-9]+/g) || []).length;
-                    const pseudoElements = (selector.match(/::[a-zA-Z0-9_-]+/g) || []).length;
-                    specificity += elements + pseudoElements;
-                    
-                    return specificity;
-                }
+                // Execute all extractions
+                result.css_variables = extractCSSVariables();
+                result.theme_colors = analyzeThemeColors();
+                result.typography = extractTypography();
+                result.layout_patterns = extractLayoutPatterns();
+                result.visual_hierarchy = extractVisualHierarchy();
+                result.stylesheets = extractStylesheets();
                 
-                return {
-                    stylesheets: stylesheets,
-                    total_stylesheets: stylesheets.length,
-                    total_rules: stylesheets.reduce((sum, sheet) => sum + sheet.rules.length, 0)
-                };
+                return result;
             }
             
-            return extractEnhancedStylesheets();
+            return extractComprehensiveStyles();
         })()
         """
+
     
     def _get_layout_analyzer_script(self) -> str:
         """Enhanced JavaScript for layout analysis."""
