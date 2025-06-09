@@ -230,13 +230,15 @@ async def update_progress(session_id: str, app_state: ApplicationState, step_nam
         "updated_at": datetime.now(UTC)
     })
 
+# Enhanced process_clone_request function for backend/app/api/routes/clone.py
+
 async def process_clone_request(
     session_id: str,
     request: CloneWebsiteRequest,
     app_state: ApplicationState,
 ):
     """
-    The complete, blueprint-driven cloning pipeline with enhanced asset handling.
+    Enhanced cloning pipeline with better asset handling and modern web support.
     """
     try:
         browser_manager = get_browser_manager()
@@ -246,9 +248,19 @@ async def process_clone_request(
         dom_extraction_service.browser_manager = browser_manager
         screenshot_service.browser_manager = browser_manager
         
-        # 1. Enhanced Blueprint Extraction
-        await update_progress(session_id, app_state, "Blueprint Extraction", "Analyzing page structure, styles, and components...", CloneStatus.ANALYZING, 10)
-        dom_result = await dom_extraction_service.extract_dom_structure(url=str(request.url), session_id=session_id)
+        # 1. Enhanced Blueprint Extraction with Asset Detection
+        await update_progress(session_id, app_state, "Blueprint Extraction", 
+                            "Analyzing page structure, detecting modern web patterns...", 
+                            CloneStatus.ANALYZING, 10)
+        
+        dom_result = await dom_extraction_service.extract_dom_structure(
+            url=str(request.url), 
+            session_id=session_id,
+            wait_for_load=True,
+            include_computed_styles=True,
+            max_depth=6
+        )
+        
         if not dom_result.success:
             raise ProcessingError(f"Blueprint extraction failed: {dom_result.error_message}")
 
@@ -257,12 +269,28 @@ async def process_clone_request(
             raise ProcessingError("Extraction returned an empty blueprint.")
 
         logger.info(f"Extracted {len(dom_result.assets)} assets for processing")
+        logger.info(f"Asset types: {getattr(dom_result, 'asset_types', [])}")
+        
+        # Log asset breakdown
+        asset_breakdown = {}
+        for asset in dom_result.assets:
+            asset_type = getattr(asset, 'asset_type', 'unknown')
+            asset_breakdown[asset_type] = asset_breakdown.get(asset_type, 0) + 1
+        logger.info(f"Asset breakdown: {asset_breakdown}")
 
-        # 2. Enhanced Asset Downloading
-        await update_progress(session_id, app_state, "Asset Downloading", f"Downloading {len(dom_result.assets)} assets (images, SVGs, icons)...", CloneStatus.SCRAPING, 25)
+        # 2. Enhanced Asset Downloading with Better Error Handling
+        await update_progress(session_id, app_state, "Asset Processing", 
+                            f"Processing {len(dom_result.assets)} assets (images, SVGs, icons)...", 
+                            CloneStatus.SCRAPING, 25)
+        
+        
         asset_downloader = AssetDownloaderService(session_id)
         download_results = await asset_downloader.download_assets(dom_result.assets)
         await asset_downloader.close()
+        
+        # Get download statistics
+        download_stats = asset_downloader.get_stats()
+        logger.info(f"Asset download stats: {download_stats}")
         
         # Create comprehensive asset map
         asset_map = {}
@@ -272,101 +300,258 @@ async def process_clone_request(
         for item in download_results:
             if item.get('success'):
                 successful_assets.append(item)
-                if item.get('original_url'):
-                    asset_map[item['original_url']] = item['local_path']
-                # Also map inline assets
+                original_url = item.get('original_url')
+                local_path = item.get('local_path')
+                
+                if original_url and local_path:
+                    asset_map[original_url] = local_path
+                
+                # Handle inline assets with special keys
                 if item.get('is_inline') and item.get('content'):
-                    asset_map[f"inline-{item.get('asset_type', 'asset')}"] = item['local_path']
+                    inline_key = f"inline-{item.get('asset_type', 'asset')}"
+                    asset_map[inline_key] = local_path
+                
+                # Handle data URLs
+                if item.get('is_data_url'):
+                    asset_map[original_url] = local_path
+                    
             else:
                 failed_assets.append(item)
 
-        logger.info(f"Asset download results: {len(successful_assets)} successful, {len(failed_assets)} failed")
+        logger.info(f"Asset processing results: {len(successful_assets)} successful, {len(failed_assets)} failed")
+        logger.info(f"Asset map keys: {list(asset_map.keys())[:10]}...")  # Log first 10 keys
 
-        # 3. Enhanced HTML Generation
-        await update_progress(session_id, app_state, "HTML Assembly", "AI is assembling HTML with assets and styling...", CloneStatus.GENERATING, 40)
+        # 3. Enhanced HTML Generation with Asset Context
+        await update_progress(session_id, app_state, "HTML Assembly", 
+                            "AI is generating HTML with enhanced asset integration...", 
+                            CloneStatus.GENERATING, 40)
+        
+        # Provide additional context to LLM about assets
+        asset_context = {
+            'total_assets': len(dom_result.assets),
+            'successful_downloads': len(successful_assets),
+            'asset_types': list(asset_breakdown.keys()),
+            'has_logos': any('logo' in str(asset.get('alt_text', '')).lower() 
+                           for asset in successful_assets),
+            'has_icons': any(asset.get('asset_type') == 'svg' 
+                           for asset in successful_assets),
+            'has_backgrounds': any('background' in asset.get('asset_type', '') 
+                                 for asset in successful_assets)
+        }
+        
         initial_generation = await llm_service.generate_html_from_components(
             component_result=blueprint,
             dom_result=dom_result,
             original_url=str(request.url),
-            quality_level=request.quality
+            quality_level=request.quality,
+            asset_context=asset_context  # Pass asset context
         )
         initial_html = initial_generation["html_content"]
 
-        # 4. Enhanced Asset Integration
-        await update_progress(session_id, app_state, "Asset Integration", "Integrating downloaded assets into HTML...", CloneStatus.GENERATING, 55)
-        rewriter = HTMLRewriterService()
+        # 4. Enhanced Asset Integration with Modern Patterns
+        await update_progress(session_id, app_state, "Asset Integration", 
+                            "Integrating assets with modern web patterns...", 
+                            CloneStatus.GENERATING, 55)
         
-        # First pass: rewrite asset paths
+        # Use enhanced HTML rewriter
+        from ..services.enhanced_html_rewriter_service import EnhancedHTMLRewriterService
+        rewriter = EnhancedHTMLRewriterService()
+        
+        # Multi-pass asset integration
+        logger.info("Starting multi-pass asset integration...")
+        
+        # Pass 1: Basic asset path rewriting
         html_with_assets = rewriter.rewrite_asset_paths(initial_html, asset_map)
         
-        # Second pass: ensure critical assets are included
-        html_with_enhanced_assets = rewriter.enhance_asset_integration(html_with_assets, download_results)
+        # Pass 2: Enhanced asset integration
+        html_with_enhanced_assets = rewriter.enhance_asset_integration(html_with_assets, successful_assets)
         
-        # Third pass: inject any missing critical assets
-        missing_assets = [asset for asset in download_results if not asset.get('success', False)]
-        if missing_assets:
-            html_with_enhanced_assets = rewriter.inject_missing_assets(html_with_enhanced_assets, successful_assets)
+        # Pass 3: Inject missing critical assets
+        if failed_assets:
+            logger.info(f"Injecting fallbacks for {len(failed_assets)} failed assets")
+            html_with_enhanced_assets = rewriter.inject_missing_assets(
+                html_with_enhanced_assets, 
+                successful_assets
+            )
+        
+        # Get rewrite statistics
+        rewrite_stats = rewriter.get_rewrite_stats()
+        logger.info(f"Asset rewrite stats: {rewrite_stats}")
 
-        # 5. Visual QA - Screenshotting
-        await update_progress(session_id, app_state, "Visual Comparison", "Capturing screenshots for visual analysis...", CloneStatus.REFINING, 60)
+        # 5. Visual QA - Enhanced Screenshot Comparison
+        await update_progress(session_id, app_state, "Visual Comparison", 
+                            "Capturing high-quality screenshots for AI analysis...", 
+                            CloneStatus.REFINING, 60)
+        
         viewport = screenshot_service.get_viewport_by_type(ViewportType.DESKTOP)
-        original_shot_task = screenshot_service.capture_screenshot(url=str(request.url), viewport=viewport, session_id=session_id, full_page=True)
-        generated_shot_task = screenshot_service.capture_html_content_screenshot(html_content=html_with_enhanced_assets, viewport=viewport, session_id=session_id, full_page=True)
+        
+        # Capture screenshots with better timing
+        original_shot_task = screenshot_service.capture_screenshot(
+            url=str(request.url), 
+            viewport=viewport, 
+            session_id=session_id, 
+            full_page=True,
+            wait_for_load=True
+        )
+        
+        generated_shot_task = screenshot_service.capture_html_content_screenshot(
+            html_content=html_with_enhanced_assets, 
+            viewport=viewport, 
+            session_id=session_id, 
+            full_page=True,
+            wait_for_load=True
+        )
         
         original_shot, generated_shot = await asyncio.gather(original_shot_task, generated_shot_task)
 
         if not original_shot.success or not generated_shot.success:
             raise ProcessingError(f"Failed to capture screenshots for VQA. Original: {original_shot.error}, Generated: {generated_shot.error}")
 
-        # 6. Visual QA - AI Feedback
-        await update_progress(session_id, app_state, "AI Quality Analysis", "AI is analyzing visual differences and asset placement...", CloneStatus.REFINING, 75)
-        feedback = await llm_service.analyze_visual_differences(original_shot.file_path, generated_shot.file_path)
-
-        # 7. Refinement based on Feedback
-        await update_progress(session_id, app_state, "Final Refinement", "Applying visual feedback to improve asset integration...", CloneStatus.REFINING, 90)
-        refined_html = await llm_service.refine_html_with_feedback(html_with_enhanced_assets, feedback)
-
-        # 8. Final Asset Path Verification
-        await update_progress(session_id, app_state, "Finalizing Assets", "Final verification of asset links and paths...", CloneStatus.COMPLETED, 95)
-        final_html_with_verified_assets = rewriter.rewrite_asset_paths(refined_html, asset_map)
-
-        # 9. Completion with Asset Report
-        final_similarity = llm_service._calculate_similarity_score(blueprint, dom_result, final_html_with_verified_assets)
+        # 6. Enhanced Visual QA with Asset-Specific Feedback
+        await update_progress(session_id, app_state, "AI Quality Analysis", 
+                            "AI analyzing visual differences and asset placement...", 
+                            CloneStatus.REFINING, 75)
         
-        # Create asset summary for the result
+        feedback = await llm_service.analyze_visual_differences(
+            original_shot.file_path, 
+            generated_shot.file_path,
+            asset_context=asset_context  # Provide asset context for better analysis
+        )
+
+        # 7. Asset-Aware Refinement
+        await update_progress(session_id, app_state, "Final Refinement", 
+                            "Applying visual feedback with focus on asset integration...", 
+                            CloneStatus.REFINING, 90)
+        
+        refined_html = await llm_service.refine_html_with_feedback(
+            html_with_enhanced_assets, 
+            feedback,
+            asset_map=asset_map,  # Provide asset map for better refinement
+            asset_context=asset_context
+        )
+
+        # 8. Final Asset Path Verification and Optimization
+        await update_progress(session_id, app_state, "Finalizing Assets", 
+                            "Final verification and optimization of asset integration...", 
+                            CloneStatus.COMPLETED, 95)
+        
+        # Final pass to ensure all assets are properly integrated
+        final_html_with_verified_assets = rewriter.rewrite_asset_paths(refined_html, asset_map)
+        
+        # Add final optimizations
+        final_html_with_verified_assets = rewriter.enhance_asset_integration(
+            final_html_with_verified_assets, 
+            successful_assets
+        )
+
+        # 9. Enhanced Completion with Detailed Asset Report
+        final_similarity = llm_service._calculate_similarity_score(
+            blueprint, 
+            dom_result, 
+            final_html_with_verified_assets
+        )
+        
+        # Create comprehensive asset summary
         asset_summary = {
-            "total_found": len(dom_result.assets),
-            "successfully_downloaded": len(successful_assets),
-            "failed_downloads": len(failed_assets),
-            "types": list(set(asset.get('asset_type', 'unknown') for asset in download_results))
+            "extraction": {
+                "total_found": len(dom_result.assets),
+                "types_found": list(asset_breakdown.keys()),
+                "extraction_metadata": {
+                    "has_react": getattr(dom_result, 'has_react', False),
+                    "has_vue": getattr(dom_result, 'has_vue', False),
+                    "has_angular": getattr(dom_result, 'has_angular', False),
+                    "extraction_limited": getattr(dom_result, 'extraction_limited', False)
+                }
+            },
+            "download": download_stats,
+            "integration": rewrite_stats,
+            "final_status": {
+                "successfully_integrated": len(successful_assets),
+                "failed_downloads": len(failed_assets),
+                "integration_rate": len(successful_assets) / max(len(dom_result.assets), 1) * 100,
+                "asset_map_size": len(asset_map)
+            }
+        }
+        
+        # Enhanced completion metrics
+        completion_metrics = {
+            "assets_processed": len(dom_result.assets),
+            "assets_integrated": len(successful_assets),
+            "asset_types": list(asset_breakdown.keys()),
+            "integration_techniques": [
+                "enhanced_extraction",
+                "multi_pass_rewriting", 
+                "modern_web_patterns",
+                "responsive_optimization"
+            ]
         }
         
         final_result = CloneResult(
             html_content=final_html_with_verified_assets,
             similarity_score=final_similarity,
-            generation_time=0,
+            generation_time=time.time() - start_time,
             tokens_used=initial_generation.get("tokens_used", 0),
-            assets=list(asset_map.keys())  # Include asset list
+            assets=list(asset_map.keys()),
+            # Add enhanced metadata
+            asset_summary=asset_summary,
+            completion_metrics=completion_metrics
         )
         
-        completion_message = f"Clone completed! Similarity: {final_similarity:.1f}%, Assets: {len(successful_assets)}/{len(dom_result.assets)} integrated"
+        completion_message = (f"Clone completed! Similarity: {final_similarity:.1f}%, "
+                            f"Assets: {len(successful_assets)}/{len(dom_result.assets)} integrated "
+                            f"({asset_summary['final_status']['integration_rate']:.1f}%)")
+        
         await update_progress(session_id, app_state, "Completed", completion_message, CloneStatus.COMPLETED, 100)
         
-        # Update session with asset information
+        # Update session with comprehensive asset information
         session_update = {
             "result": final_result.model_dump(),
-            "asset_summary": asset_summary
+            "asset_summary": asset_summary,
+            "extraction_metadata": {
+                "modern_web_features": {
+                    "react_detected": getattr(dom_result, 'has_react', False),
+                    "vue_detected": getattr(dom_result, 'has_vue', False),
+                    "angular_detected": getattr(dom_result, 'has_angular', False)
+                },
+                "asset_extraction": {
+                    "total_extracted": len(dom_result.assets),
+                    "types_detected": getattr(dom_result, 'asset_types', []),
+                    "extraction_limited": getattr(dom_result, 'extraction_limited', False)
+                }
+            }
         }
         app_state.update_session(session_id, session_update)
 
-        logger.info(f"Clone completed successfully with {len(successful_assets)} assets integrated")
+        logger.info(f"Enhanced clone completed successfully!")
+        logger.info(f"Final stats: {completion_metrics}")
+        logger.info(f"Asset integration: {asset_summary['final_status']}")
 
     except Exception as e:
-        error_message = f"Clone processing failed: {str(e)}"
+        error_message = f"Enhanced clone processing failed: {str(e)}"
         logger.error(error_message, exc_info=True)
+        
+        # Provide detailed error context
+        error_context = {
+            "stage": "unknown",
+            "assets_found": 0,
+            "assets_processed": 0,
+            "error_type": type(e).__name__
+        }
+        
+        # Try to determine what stage failed
+        if "blueprint extraction" in str(e).lower():
+            error_context["stage"] = "blueprint_extraction"
+        elif "asset" in str(e).lower():
+            error_context["stage"] = "asset_processing"
+        elif "html" in str(e).lower():
+            error_context["stage"] = "html_generation"
+        elif "screenshot" in str(e).lower():
+            error_context["stage"] = "visual_analysis"
+        
         app_state.update_session(session_id, {
             "status": CloneStatus.FAILED.value,
             "error_message": error_message,
+            "error_context": error_context,
             "updated_at": datetime.now(UTC)
         })
 

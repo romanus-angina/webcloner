@@ -1,10 +1,10 @@
 def get_dom_extractor_script() -> str:
     """
-    Returns the fixed JavaScript code for enhanced DOM extraction.
+    Returns the enhanced JavaScript code for DOM extraction with better asset detection.
     """
     return """
     (() => {
-        // Configuration for size limits to prevent token overflow
+        // Enhanced configuration for better asset detection
         const CONFIG = {
             MAX_DEPTH: 6,
             MAX_CHILDREN: 8,
@@ -12,82 +12,228 @@ def get_dom_extractor_script() -> str:
             MAX_COMPONENTS: 150,
             MAX_HTML_LENGTH: 500,
             SKIP_SMALL_ELEMENTS: true,
-            MIN_ELEMENT_SIZE: 10
+            MIN_ELEMENT_SIZE: 10,
+            ASSET_TIMEOUT: 5000,
+            MAX_ASSETS: 100
         };
         
         let componentCount = 0;
-        let extractedAssets = new Set();
+        let extractedAssets = new Map(); // Use Map for better deduplication
+        let assetId = 0;
 
+        // Enhanced asset extraction with better error handling and detection
         const extractAssetFromElement = (element) => {
             const assets = [];
             
-            // Handle IMG tags
-            if (element.tagName === 'IMG') {
-                const src = element.src || element.getAttribute('src');
-                const dataSrc = element.getAttribute('data-src');
-                const assetUrl = src || dataSrc;
+            try {
+                // Handle IMG tags with multiple src attributes
+                if (element.tagName === 'IMG') {
+                    const sources = [
+                        element.src,
+                        element.getAttribute('src'),
+                        element.getAttribute('data-src'),
+                        element.getAttribute('data-lazy-src'),
+                        element.getAttribute('data-original'),
+                        element.dataset?.src,
+                        element.dataset?.lazySrc
+                    ].filter(Boolean);
+                    
+                    for (const src of sources) {
+                        if (src && !extractedAssets.has(src)) {
+                            extractedAssets.set(src, ++assetId);
+                            
+                            // Get image dimensions
+                            const rect = element.getBoundingClientRect();
+                            const naturalWidth = element.naturalWidth || element.width;
+                            const naturalHeight = element.naturalHeight || element.height;
+                            
+                            assets.push({
+                                id: assetId,
+                                url: src.startsWith('//') ? 'https:' + src : src,
+                                asset_type: 'image',
+                                alt_text: element.alt || element.getAttribute('aria-label') || element.title || `image-${assetId}`,
+                                width: naturalWidth || rect.width,
+                                height: naturalHeight || rect.height,
+                                display_width: rect.width,
+                                display_height: rect.height,
+                                loading: element.loading || 'eager',
+                                classes: Array.from(element.classList),
+                                parent_tag: element.parentElement?.tagName,
+                                usage_context: ['img-tag']
+                            });
+                        }
+                    }
+                }
                 
-                if (assetUrl && !extractedAssets.has(assetUrl)) {
-                    extractedAssets.add(assetUrl);
-                    assets.push({
-                        url: assetUrl,
-                        asset_type: 'image',
-                        alt_text: element.alt || element.getAttribute('aria-label') || 'image',
-                        width: element.width || element.getAttribute('width'),
-                        height: element.height || element.getAttribute('height')
-                    });
+                // Enhanced SVG handling - both inline and external
+                if (element.tagName === 'SVG') {
+                    const svgContent = element.outerHTML;
+                    const svgId = element.id || element.getAttribute('class') || `inline-svg-${++assetId}`;
+                    
+                    if (!extractedAssets.has(svgId)) {
+                        extractedAssets.set(svgId, assetId);
+                        
+                        // Extract viewBox and dimensions
+                        const viewBox = element.getAttribute('viewBox');
+                        const width = element.getAttribute('width') || element.style.width;
+                        const height = element.getAttribute('height') || element.style.height;
+                        
+                        assets.push({
+                            id: assetId,
+                            content: svgContent,
+                            asset_type: 'svg',
+                            alt_text: element.getAttribute('aria-label') || element.title || svgId,
+                            is_inline: true,
+                            viewBox: viewBox,
+                            width: width,
+                            height: height,
+                            classes: Array.from(element.classList),
+                            usage_context: ['inline-svg']
+                        });
+                    }
                 }
-            }
-            
-            // Handle SVG tags - capture inline SVGs
-            if (element.tagName === 'SVG') {
-                const svgContent = element.outerHTML;
-                const svgId = element.id || element.getAttribute('class') || 'inline-svg';
                 
-                if (!extractedAssets.has(svgId)) {
-                    extractedAssets.add(svgId);
-                    assets.push({
-                        content: svgContent,
-                        asset_type: 'svg',
-                        alt_text: svgId,
-                        is_inline: true
+                // Handle PICTURE elements with source sets
+                if (element.tagName === 'PICTURE') {
+                    const sources = element.querySelectorAll('source');
+                    const img = element.querySelector('img');
+                    
+                    sources.forEach((source, index) => {
+                        const srcset = source.getAttribute('srcset');
+                        const media = source.getAttribute('media');
+                        
+                        if (srcset) {
+                            // Extract URLs from srcset
+                            const urls = srcset.split(',').map(s => s.trim().split(' ')[0]);
+                            urls.forEach(url => {
+                                if (url && !extractedAssets.has(url)) {
+                                    extractedAssets.set(url, ++assetId);
+                                    assets.push({
+                                        id: assetId,
+                                        url: url.startsWith('//') ? 'https:' + url : url,
+                                        asset_type: 'image',
+                                        alt_text: img?.alt || `picture-source-${index}`,
+                                        media_query: media,
+                                        is_responsive: true,
+                                        usage_context: ['picture-source']
+                                    });
+                                }
+                            });
+                        }
                     });
+                    
+                    if (img?.src && !extractedAssets.has(img.src)) {
+                        extractedAssets.set(img.src, ++assetId);
+                        assets.push({
+                            id: assetId,
+                            url: img.src,
+                            asset_type: 'image',
+                            alt_text: img.alt || 'picture-fallback',
+                            is_fallback: true,
+                            usage_context: ['picture-img']
+                        });
+                    }
                 }
-            }
-            
-            // Handle background images from CSS
-            const style = window.getComputedStyle(element);
-            const backgroundImage = style.backgroundImage;
-            if (backgroundImage && backgroundImage !== 'none') {
-                const urlMatch = backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/);
-                if (urlMatch && urlMatch[1] && !extractedAssets.has(urlMatch[1])) {
-                    extractedAssets.add(urlMatch[1]);
-                    assets.push({
-                        url: urlMatch[1],
-                        asset_type: 'background-image',
-                        alt_text: 'background image',
-                        usage_context: 'background'
-                    });
+                
+                // Enhanced background image detection
+                const style = window.getComputedStyle(element);
+                const backgroundImage = style.backgroundImage;
+                
+                if (backgroundImage && backgroundImage !== 'none') {
+                    // Handle multiple background images
+                    const urlMatches = backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/g);
+                    
+                    if (urlMatches) {
+                        urlMatches.forEach(match => {
+                            const urlMatch = match.match(/url\\(["']?([^"')]+)["']?\\)/);
+                            if (urlMatch && urlMatch[1] && !extractedAssets.has(urlMatch[1])) {
+                                const url = urlMatch[1];
+                                extractedAssets.set(url, ++assetId);
+                                
+                                assets.push({
+                                    id: assetId,
+                                    url: url.startsWith('//') ? 'https:' + url : url,
+                                    asset_type: 'background-image',
+                                    alt_text: element.getAttribute('aria-label') || element.title || 'background-image',
+                                    background_size: style.backgroundSize,
+                                    background_position: style.backgroundPosition,
+                                    background_repeat: style.backgroundRepeat,
+                                    element_tag: element.tagName,
+                                    element_classes: Array.from(element.classList),
+                                    usage_context: ['background-css']
+                                });
+                            }
+                        });
+                    }
                 }
-            }
-            
-            // Handle picture elements
-            if (element.tagName === 'PICTURE') {
-                const img = element.querySelector('img');
-                if (img && img.src && !extractedAssets.has(img.src)) {
-                    extractedAssets.add(img.src);
-                    assets.push({
-                        url: img.src,
-                        asset_type: 'image',
-                        alt_text: img.alt || 'picture',
-                        is_responsive: true
-                    });
+                
+                // Handle video and audio elements
+                if (['VIDEO', 'AUDIO'].includes(element.tagName)) {
+                    const poster = element.getAttribute('poster');
+                    if (poster && !extractedAssets.has(poster)) {
+                        extractedAssets.set(poster, ++assetId);
+                        assets.push({
+                            id: assetId,
+                            url: poster,
+                            asset_type: 'video-poster',
+                            alt_text: 'video-poster',
+                            usage_context: ['media-poster']
+                        });
+                    }
                 }
+                
+            } catch (error) {
+                console.warn('Asset extraction error for element:', element, error);
             }
             
             return assets;
         };
 
+        // Also scan stylesheets for additional assets
+        const extractAssetsFromStylesheets = () => {
+            const assets = [];
+            
+            try {
+                const sheets = Array.from(document.styleSheets);
+                
+                for (const sheet of sheets) {
+                    try {
+                        const rules = sheet.cssRules || sheet.rules;
+                        if (!rules) continue;
+                        
+                        for (const rule of rules) {
+                            if (rule.style) {
+                                // Check background-image
+                                const bgImage = rule.style.backgroundImage;
+                                if (bgImage && bgImage !== 'none') {
+                                    const urlMatch = bgImage.match(/url\\(["']?([^"')]+)["']?\\)/);
+                                    if (urlMatch && urlMatch[1] && !extractedAssets.has(urlMatch[1])) {
+                                        extractedAssets.set(urlMatch[1], ++assetId);
+                                        assets.push({
+                                            id: assetId,
+                                            url: urlMatch[1],
+                                            asset_type: 'css-background',
+                                            alt_text: 'css-background',
+                                            css_selector: rule.selectorText,
+                                            usage_context: ['stylesheet']
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Cross-origin or other stylesheet error
+                        continue;
+                    }
+                }
+            } catch (error) {
+                console.warn('Stylesheet asset extraction error:', error);
+            }
+            
+            return assets;
+        };
+
+        // Component detection functions (simplified for now)
         const getAppliedCssRules = (element) => {
             if (componentCount > CONFIG.MAX_COMPONENTS) return [];
             
@@ -262,17 +408,43 @@ def get_dom_extractor_script() -> str:
 
         // Start extraction
         const allAssets = [];
+        
+        // Extract from stylesheets first
+        const stylesheetAssets = extractAssetsFromStylesheets();
+        allAssets.push(...stylesheetAssets);
+        
+        // Then extract from DOM tree
         const blueprint = buildComponentTree(document.body, 0, allAssets);
         
-        console.log('Component extraction completed: ' + componentCount + ' components, ' + allAssets.length + ' assets');
+        // Deduplicate assets
+        const uniqueAssets = [];
+        const seenUrls = new Set();
+        
+        for (const asset of allAssets) {
+            const key = asset.url || asset.content?.substring(0, 100) || asset.id;
+            if (!seenUrls.has(key)) {
+                seenUrls.add(key);
+                uniqueAssets.push(asset);
+            }
+        }
+        
+        console.log('Enhanced component extraction completed:', {
+            components: componentCount,
+            assets: uniqueAssets.length,
+            assetTypes: [...new Set(uniqueAssets.map(a => a.asset_type))]
+        });
         
         return { 
             blueprint: blueprint,
-            assets: allAssets,
+            assets: uniqueAssets.slice(0, CONFIG.MAX_ASSETS), // Limit assets
             metadata: {
                 total_components: componentCount,
-                total_assets: allAssets.length,
-                extraction_limited: componentCount >= CONFIG.MAX_COMPONENTS
+                total_assets: uniqueAssets.length,
+                extraction_limited: componentCount >= CONFIG.MAX_COMPONENTS,
+                asset_types: [...new Set(uniqueAssets.map(a => a.asset_type))],
+                has_react: !!document.querySelector('[data-reactroot]'),
+                has_vue: !!window.Vue,
+                has_angular: !!window.ng
             }
         };
     })();

@@ -47,23 +47,127 @@ class DOMExtractionService:
             "dom_extractor": extractors.get_dom_extractor_script()
         }
     
-    async def _wait_for_dynamic_content(self, page, timeout: int = 5000):
-        """Waits for a period to allow dynamic content to load."""
-        await asyncio.sleep(timeout / 1000)
+    async def _wait_for_dynamic_content(self, page, timeout: int = 8000):
+        """Enhanced waiting for dynamic content including React/Vue apps."""
+        # Wait for basic content
+        await asyncio.sleep(2)
+        
+        # Wait for React apps
+        try:
+            await page.wait_for_function("""
+                () => {
+                    // Check if React has finished rendering
+                    if (window.React || document.querySelector('[data-reactroot]')) {
+                        const reactElements = document.querySelectorAll('[data-reactroot] *');
+                        return reactElements.length > 10; // Assume some content has loaded
+                    }
+                    return true; // Not a React app
+                }
+            """, timeout=timeout)
+        except Exception as e:
+            logger.debug(f"React wait timeout: {e}")
+        
+        # Wait for Vue apps
+        try:
+            await page.wait_for_function("""
+                () => {
+                    if (window.Vue || document.querySelector('[data-v-]')) {
+                        const vueElements = document.querySelectorAll('[data-v-]');
+                        return vueElements.length > 5;
+                    }
+                    return true; // Not a Vue app
+                }
+            """, timeout=timeout)
+        except Exception as e:
+            logger.debug(f"Vue wait timeout: {e}")
+        
+        # Wait for images to start loading
+        try:
+            await page.wait_for_function("""
+                () => {
+                    const images = document.querySelectorAll('img');
+                    if (images.length === 0) return true;
+                    
+                    let loadedCount = 0;
+                    images.forEach(img => {
+                        if (img.complete || img.naturalWidth > 0) {
+                            loadedCount++;
+                        }
+                    });
+                    
+                    // Consider it ready if at least 50% of images are loaded or started loading
+                    return loadedCount >= Math.min(images.length * 0.5, 10);
+                }
+            """, timeout=timeout)
+        except Exception as e:
+            logger.debug(f"Image loading wait timeout: {e}")
 
     async def _extract_page_structure(self, page, url: str) -> PageStructure:
-        """Extracts basic page metadata like title."""
-        title = await page.title()
-        return PageStructure(url=url, title=title)
-
+        """Enhanced page structure extraction."""
+        try:
+            # Extract comprehensive page metadata
+            page_data = await page.evaluate("""
+                () => {
+                    const getMetaContent = (name) => {
+                        const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
+                        return meta ? meta.getAttribute('content') : null;
+                    };
+                    
+                    return {
+                        title: document.title,
+                        description: getMetaContent('description'),
+                        keywords: getMetaContent('keywords'),
+                        lang: document.documentElement.lang,
+                        charset: document.characterSet,
+                        viewport: getMetaContent('viewport'),
+                        favicon: document.querySelector('link[rel*="icon"]')?.href,
+                        canonical: document.querySelector('link[rel="canonical"]')?.href,
+                        og_title: getMetaContent('og:title'),
+                        og_description: getMetaContent('og:description'),
+                        og_image: getMetaContent('og:image'),
+                        og_url: getMetaContent('og:url'),
+                        twitter_card: getMetaContent('twitter:card'),
+                        twitter_title: getMetaContent('twitter:title'),
+                        twitter_description: getMetaContent('twitter:description'),
+                        twitter_image: getMetaContent('twitter:image')
+                    };
+                }
+            """)
+            
+            # Build Open Graph data
+            open_graph = {}
+            for key, value in page_data.items():
+                if key.startswith('og_') and value:
+                    open_graph[key[3:]] = value
+                elif key.startswith('twitter_') and value:
+                    open_graph[key] = value
+            
+            return PageStructure(
+                title=page_data.get('title'),
+                meta_description=page_data.get('description'),
+                meta_keywords=page_data.get('keywords'),
+                lang=page_data.get('lang'),
+                charset=page_data.get('charset'),
+                viewport=page_data.get('viewport'),
+                favicon_url=page_data.get('favicon'),
+                canonical_url=page_data.get('canonical'),
+                open_graph=open_graph
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract page structure: {e}")
+            return PageStructure(title="Unknown")
 
     async def extract_dom_structure(
-    self,
-    url: str,
-    session_id: str
-) -> DOMExtractionResult:
+        self,
+        url: str,
+        session_id: str,
+        wait_for_load: bool = True,
+        include_computed_styles: bool = True,
+        max_depth: int = 6
+    ) -> DOMExtractionResult:
         """
-        Extracts a complete hierarchical blueprint with enhanced asset detection.
+        Enhanced DOM extraction with better asset detection and modern web support.
         """
         start_time = time.time()
         logger.info(f"Starting enhanced blueprint extraction for {url}")
@@ -74,11 +178,27 @@ class DOMExtractionService:
         try:
             async with self.browser_manager.page_context() as page:
                 await self.browser_manager.navigate_to_url(page, url, wait_for="networkidle")
-                await self._wait_for_dynamic_content(page)
+                
+                # Enhanced waiting for dynamic content
+                await self._wait_for_dynamic_content(page, timeout=8000)
+                
+                # Wait for images to load with proper error handling
+                try:
+                    await page.wait_for_function("""
+                        () => {
+                            const images = Array.from(document.images);
+                            return images.every(img => img.complete || img.naturalWidth > 0);
+                        }
+                    """, timeout=10000)
+                except Exception as e:
+                    logger.warning(f"Image loading wait failed: {e}")
+                    # Continue without failing the entire process
                 
                 page_structure = await self._extract_page_structure(page, url)
 
                 logger.info("Executing enhanced blueprint extraction script...")
+                
+                # Use the enhanced extractor script
                 extraction_data = await page.evaluate(self._javascript_extractors["dom_extractor"])
                 
                 if not extraction_data:
@@ -94,35 +214,56 @@ class DOMExtractionService:
                 # Debug asset extraction
                 if assets_data:
                     logger.info(f"Assets found: {len(assets_data)}")
-                    for i, asset in enumerate(assets_data[:5]):  # Log first 5 assets
-                        logger.info(f"Asset {i+1}: type={asset.get('asset_type')}, url={asset.get('url', 'N/A')[:100]}, has_content={bool(asset.get('content'))}")
+                    asset_types = {}
+                    for asset in assets_data:
+                        asset_type = asset.get('asset_type', 'unknown')
+                        asset_types[asset_type] = asset_types.get(asset_type, 0) + 1
+                    logger.info(f"Asset types: {asset_types}")
+                    
+                    # Log sample assets
+                    for i, asset in enumerate(assets_data[:5]):
+                        logger.info(f"Asset {i+1}: type={asset.get('asset_type')}, " +
+                                f"url={asset.get('url', 'N/A')[:100]}, " +
+                                f"has_content={bool(asset.get('content'))}")
                 else:
                     logger.warning("No assets found in extraction")
 
                 # Convert blueprint to model
                 blueprint_model = DetectedComponent(**blueprint_dict) if blueprint_dict else None
 
-                # Convert assets to models
+                # Enhanced asset conversion with better error handling
                 assets = []
                 for asset_data in assets_data:
                     try:
-                        # Handle different asset structures
+                        # Create asset model with all available fields
                         asset_model = ExtractedAsset(
                             url=asset_data.get('url'),
                             content=asset_data.get('content'),
                             asset_type=asset_data.get('asset_type', 'unknown'),
+                            mime_type=asset_data.get('content_type'),
                             alt_text=asset_data.get('alt_text'),
-                            dimensions=asset_data.get('dimensions'),
-                            usage_context=asset_data.get('usage_context', [])
+                            dimensions=asset_data.get('dimensions') or (
+                                (asset_data.get('width'), asset_data.get('height')) 
+                                if asset_data.get('width') and asset_data.get('height') 
+                                else None
+                            ),
+                            usage_context=asset_data.get('usage_context', []),
+                            is_background=asset_data.get('asset_type') in ['background-image', 'css-background'],
+                            size=asset_data.get('file_size')
                         )
                         assets.append(asset_model)
                     except Exception as e:
                         logger.warning(f"Failed to create asset model: {e}")
-                        # Create basic asset model
-                        assets.append(ExtractedAsset(
-                            url=asset_data.get('url'),
-                            asset_type=asset_data.get('asset_type', 'unknown')
-                        ))
+                        # Create minimal asset model
+                        try:
+                            minimal_asset = ExtractedAsset(
+                                url=asset_data.get('url'),
+                                asset_type=asset_data.get('asset_type', 'unknown'),
+                                alt_text=asset_data.get('alt_text', 'asset')
+                            )
+                            assets.append(minimal_asset)
+                        except Exception as e2:
+                            logger.error(f"Failed to create minimal asset model: {e2}")
 
                 extraction_time = time.time() - start_time
                 
@@ -135,15 +276,17 @@ class DOMExtractionService:
                     blueprint=blueprint_model,
                     assets=assets,
                     success=True,
-                    # Add metadata fields
+                    # Enhanced metadata
                     total_elements=metadata.get('total_components', 0),
-                    total_stylesheets=0,  # Will be filled if needed
+                    total_stylesheets=0,
                     total_assets=len(assets),
-                    dom_depth=6  # Max depth from our config
+                    dom_depth=max_depth
                 )
                 
                 logger.info(f"Enhanced blueprint extraction completed in {extraction_time:.2f}s")
                 logger.info(f"Extracted {len(assets)} assets, {metadata.get('total_components', 0)} components")
+                logger.info(f"Asset types found: {metadata.get('asset_types', [])}")
+                
                 return result
                 
         except Exception as e:
@@ -161,6 +304,63 @@ class DOMExtractionService:
             )
 
 
+
+async def _extract_page_structure(self, page, url: str) -> PageStructure:
+    """Enhanced page structure extraction."""
+    try:
+        # Extract comprehensive page metadata
+        page_data = await page.evaluate("""
+            () => {
+                const getMetaContent = (name) => {
+                    const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
+                    return meta ? meta.getAttribute('content') : null;
+                };
+                
+                return {
+                    title: document.title,
+                    description: getMetaContent('description'),
+                    keywords: getMetaContent('keywords'),
+                    lang: document.documentElement.lang,
+                    charset: document.characterSet,
+                    viewport: getMetaContent('viewport'),
+                    favicon: document.querySelector('link[rel*="icon"]')?.href,
+                    canonical: document.querySelector('link[rel="canonical"]')?.href,
+                    og_title: getMetaContent('og:title'),
+                    og_description: getMetaContent('og:description'),
+                    og_image: getMetaContent('og:image'),
+                    og_url: getMetaContent('og:url'),
+                    twitter_card: getMetaContent('twitter:card'),
+                    twitter_title: getMetaContent('twitter:title'),
+                    twitter_description: getMetaContent('twitter:description'),
+                    twitter_image: getMetaContent('twitter:image')
+                };
+            }
+        """)
+        
+        # Build Open Graph data
+        open_graph = {}
+        for key, value in page_data.items():
+            if key.startswith('og_') and value:
+                open_graph[key[3:]] = value
+            elif key.startswith('twitter_') and value:
+                open_graph[key] = value
+        
+        return PageStructure(
+            url=url,
+            title=page_data.get('title'),
+            meta_description=page_data.get('description'),
+            meta_keywords=page_data.get('keywords'),
+            lang=page_data.get('lang'),
+            charset=page_data.get('charset'),
+            viewport=page_data.get('viewport'),
+            favicon_url=page_data.get('favicon'),
+            canonical_url=page_data.get('canonical'),
+            open_graph=open_graph
+        )
+        
+    except Exception as e:
+        logger.warning(f"Failed to extract page structure: {e}")
+        return PageStructure(url=url, title="Unknown")
 
     async def save_extraction_result(self, result: DOMExtractionResult, output_format: str = "json") -> str:
         return await storage.save_extraction_result(result, output_format)
