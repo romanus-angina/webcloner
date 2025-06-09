@@ -127,7 +127,8 @@ async def get_clone_status(
         created_at=session_data.get("created_at"),
         updated_at=session_data.get("updated_at", datetime.now(UTC)),
         estimated_completion=session_data.get("estimated_completion"),
-        error_message=session_data.get("error_message")
+        error_message=session_data.get("error_message"),
+        component_analysis=session_data.get("component_analysis")
     )
     
     return response
@@ -392,7 +393,14 @@ async def process_clone_request(
             "component_analysis": {
                 "total_components": component_result.total_components,
                 "detection_time": component_result.detection_time_seconds,
-                "components_replicated": llm_result["components_replicated"]
+                "components_replicated": llm_result["components_replicated"],
+                "components_detected": [
+                    {
+                        "type": comp.component_type.value,
+                        "label": comp.label,
+                        "metadata": comp.metadata
+                    } for comp in component_result.components
+                ]
             },
             "progress": [
                 ProgressStep(

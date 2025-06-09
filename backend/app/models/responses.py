@@ -49,6 +49,8 @@ class CloneResponse(BaseModel):
     updated_at: datetime = Field(..., description="When the clone was last updated")
     estimated_completion: Optional[datetime] = Field(None, description="Estimated completion time")
     error_message: Optional[str] = Field(None, description="Error message if failed")
+    component_analysis: Optional[Dict[str, Any]] = Field(None, description="Component detection analysis results")
+
 
     class Config:
         json_encoders = {

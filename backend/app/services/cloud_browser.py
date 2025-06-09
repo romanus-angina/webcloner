@@ -344,81 +344,115 @@ class CloudBrowserService:
             }
     
     async def cleanup(self) -> None:
-        """Clean up cloud browser resources."""
+        """Clean up cloud browser resources with improved error handling."""
         logger.info("Cleaning up cloud browser service")
         
-        # Close all contexts
-        for context in self._contexts[:]:
-            try:
-                await context.close()
-                self._contexts.remove(context)
-            except Exception as e:
-                logger.warning(f"Error closing cloud context: {str(e)}")
-        
-        # Close browser connection
-        if self._browser:
-            try:
-                await self._browser.close()
-                logger.info("Cloud browser connection closed")
-            except Exception as e:
-                logger.warning(f"Error closing cloud browser: {str(e)}")
-            finally:
-                self._browser = None
-        
-        # Stop playwright
-        if self._playwright:
-            try:
-                await self._playwright.stop()
-                logger.info("Playwright stopped")
-            except Exception as e:
-                logger.warning(f"Error stopping Playwright: {str(e)}")
-            finally:
-                self._playwright = None
-        
-        # End Browserbase session
+        # End Browserbase session FIRST (before closing browser)
         if self._session_id:
             try:
                 await self._end_session()
             except Exception as e:
                 logger.warning(f"Error ending Browserbase session: {str(e)}")
         
+        # Close all contexts
+        for context in self._contexts[:]:
+            try:
+                await asyncio.wait_for(context.close(), timeout=5.0)
+                self._contexts.remove(context)
+                logger.debug("Cloud context closed successfully")
+            except asyncio.TimeoutError:
+                logger.warning("Context close timed out")
+            except Exception as e:
+                logger.warning(f"Error closing cloud context: {str(e)}")
+        
+        # Close browser connection
+        if self._browser:
+            try:
+                # Set a timeout for browser closing
+                await asyncio.wait_for(self._browser.close(), timeout=10.0)
+                logger.info("Cloud browser connection closed")
+            except asyncio.TimeoutError:
+                logger.warning("Browser close timed out - forcing disconnect")
+            except Exception as e:
+                logger.warning(f"Error closing cloud browser: {str(e)}")
+            finally:
+                self._browser = None
+        
+        # Stop playwright (with event loop protection)
+        if self._playwright:
+            try:
+                # Check if event loop is still running
+                loop = asyncio.get_event_loop()
+                if not loop.is_closed():
+                    await asyncio.wait_for(self._playwright.stop(), timeout=5.0)
+                    logger.info("Playwright stopped")
+                else:
+                    logger.warning("Event loop closed, skipping playwright.stop()")
+            except asyncio.TimeoutError:
+                logger.warning("Playwright stop timed out")
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    logger.warning("Event loop closed during playwright cleanup")
+                else:
+                    logger.warning(f"Runtime error stopping Playwright: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Error stopping Playwright: {str(e)}")
+            finally:
+                self._playwright = None
+        
         self._is_connected = False
         self._session_id = None
         self._connect_url = None 
         logger.info("Cloud browser service cleanup completed")
-    
+
     async def _end_session(self) -> None:
-        """End the Browserbase session."""
+        """End the Browserbase session with improved error handling."""
         if not self._session_id:
             return
         
         try:
             headers = {
-                "x-bb-api-key": settings.BROWSERBASE_API_KEY
+                "x-bb-api-key": settings.BROWSERBASE_API_KEY,
+                "Content-Type": "application/json"
             }
             
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.delete(
-                    f"https://www.browserbase.com/v1/sessions/{self._session_id}",
+            # Use a shorter timeout for cleanup operations
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                # Try the correct API endpoint format
+                response = await client.post(
+                    f"https://www.browserbase.com/v1/sessions/{self._session_id}/stop",
                     headers=headers
                 )
                 
-                if response.status_code in [200, 204]:
-                    logger.info(f"Browserbase session {self._session_id} ended successfully")
+                if response.status_code in [200, 201, 204]:
+                    logger.info(f"Browserbase session {self._session_id} stopped successfully")
+                    return
+                elif response.status_code == 404:
+                    logger.info(f"Browserbase session {self._session_id} already ended")
+                    return
                 else:
-                    logger.warning(f"Failed to end session {self._session_id}: {response.status_code}")
+                    # If POST /stop doesn't work, try DELETE
+                    logger.warning(f"POST /stop failed with {response.status_code}, trying DELETE")
                     
+                    delete_response = await client.delete(
+                        f"https://www.browserbase.com/v1/sessions/{self._session_id}",
+                        headers=headers
+                    )
+                    
+                    if delete_response.status_code in [200, 204, 404]:
+                        logger.info(f"Browserbase session {self._session_id} deleted successfully")
+                    else:
+                        logger.warning(f"Failed to end session {self._session_id}: DELETE returned {delete_response.status_code}")
+                        logger.warning(f"Response: {delete_response.text}")
+                    
+        except httpx.TimeoutException:
+            logger.error(f"Timeout ending Browserbase session {self._session_id}")
         except Exception as e:
-            logger.error(f"Error ending Browserbase session: {str(e)}")
-    
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.initialize()
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.cleanup()
+            logger.error(f"Error ending Browserbase session {self._session_id}: {str(e)}")
+        finally:
+            # Always clear the session ID to prevent retry attempts
+            logger.info(f"Clearing session ID {self._session_id}")
+            self._session_id = None
 
 
 # Factory function to create appropriate browser service
