@@ -22,7 +22,7 @@ from ...models.responses import (
     SessionListResponse,
     CloneResult
 )
-from ...core.exceptions import ValidationError, SessionError
+from ...core.exceptions import ValidationError, SessionError, ProcessingError
 from ...config import Settings
 import logging
 from ...services.llm_service import llm_service
@@ -294,10 +294,7 @@ async def process_clone_request(
     settings: Settings,
     logger: logging.Logger
 ):
-    """
-    Background task to process the actual cloning request.
-    Enhanced with component detection and LLM generation.
-    """
+    """Background task to process the actual cloning request."""
     logger.info(f"Processing clone request for session {session_id}")
     
     try:
@@ -307,12 +304,14 @@ async def process_clone_request(
             "updated_at": datetime.now(UTC)
         })
         
-        # Step 1: DOM Extraction
+        # Step 1: DOM Extraction with browser manager check
         from ...dependencies import get_browser_manager, get_dom_extraction_service
         browser_manager = get_browser_manager()
         dom_service = get_dom_extraction_service()
         
+        # Ensure browser manager is initialized and connected
         if not browser_manager._is_initialized:
+            logger.info("Initializing browser manager for DOM extraction")
             await browser_manager.initialize()
         
         dom_service.browser_manager = browser_manager
@@ -327,6 +326,8 @@ async def process_clone_request(
         )
         
         if not dom_result.success:
+            # Import ProcessingError here if not imported globally
+            from ...core.exceptions import ProcessingError
             raise ProcessingError(f"DOM extraction failed: {dom_result.error_message}")
         
         # Step 2: Component Detection
@@ -413,10 +414,22 @@ async def process_clone_request(
                 )
             ]
         })
+
+        logger.info(f"Updated session {session_id} with component_analysis containing {component_result.total_components} components")
+        
+        # Debug log to verify data is stored
+        debug_session_data = app_state.get_session(session_id)
+        if debug_session_data and debug_session_data.get("component_analysis"):
+            logger.info(f"✓ component_analysis stored successfully for session {session_id}")
+        else:
+            logger.error(f"✗ component_analysis NOT stored for session {session_id}")
         
         logger.info(f"Clone request completed for session {session_id}: {llm_result['similarity_score']:.1f}% similarity")
         
     except Exception as e:
+        # Make sure ProcessingError is imported
+        from ...core.exceptions import ProcessingError
+        
         logger.error(f"Error processing clone request {session_id}: {str(e)}")
         app_state.update_session(session_id, {
             "status": CloneStatus.FAILED.value,

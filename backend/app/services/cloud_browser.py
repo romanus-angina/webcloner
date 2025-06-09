@@ -196,6 +196,12 @@ class CloudBrowserService:
         if not self._is_connected or not self._browser:
             raise BrowserError("Cloud browser service not connected")
         
+        # Check if browser is still connected
+        if not self._browser.is_connected():
+            logger.warning("Browser connection lost, attempting to reconnect")
+            await self.cleanup()
+            await self.initialize()
+        
         try:
             # Default context options for cloud browser
             default_options = {

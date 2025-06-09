@@ -51,16 +51,13 @@ class JSONResponse(BaseJSONResponse):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
-    Handles startup and shutdown events.
-    """
+    """Application lifespan manager."""
     # Startup
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Debug mode: {settings.debug}")
     
-    # Initialize browser manager
+    # Initialize browser manager with error handling
     try:
         browser_manager = get_browser_manager()
         await browser_manager.initialize()
@@ -68,6 +65,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Browser manager initialization failed: {str(e)}")
         logger.info("Browser will be initialized on first use")
+        # Don't fail startup - browser will be initialized on demand
     
     yield
     
@@ -75,8 +73,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application")
     try:
         browser_manager = get_browser_manager()
-        await browser_manager.cleanup()
-        logger.info("Browser manager cleaned up")
+        if browser_manager._is_initialized:
+            await browser_manager.cleanup()
+            logger.info("Browser manager cleaned up")
     except Exception as e:
         logger.warning(f"Browser cleanup error: {str(e)}")
 
