@@ -58,16 +58,15 @@ class DOMExtractionService:
 
 
     async def extract_dom_structure(
-        self,
-        url: str,
-        session_id: str
-    ) -> DOMExtractionResult:
+    self,
+    url: str,
+    session_id: str
+) -> DOMExtractionResult:
         """
-        Extracts a complete hierarchical blueprint from the page using the
-        injected JavaScript extractor.
+        Extracts a complete hierarchical blueprint with enhanced asset detection.
         """
         start_time = time.time()
-        logger.info(f"Starting blueprint extraction for {url}")
+        logger.info(f"Starting enhanced blueprint extraction for {url}")
 
         if not self.browser_manager:
             raise BrowserError("Browser manager not available for DOM extraction")
@@ -79,24 +78,43 @@ class DOMExtractionService:
                 
                 page_structure = await self._extract_page_structure(page, url)
 
-                logger.info("Executing blueprint extraction script...")
+                logger.info("Executing enhanced blueprint extraction script...")
                 extraction_data = await page.evaluate(self._javascript_extractors["dom_extractor"])
                 
-                if not extraction_data or "blueprint" not in extraction_data:
-                    raise ProcessingError("Blueprint extraction script returned invalid data.")
+                if not extraction_data:
+                    raise ProcessingError("Blueprint extraction script returned no data.")
 
-                blueprint_dict = extraction_data["blueprint"]
+                # Extract blueprint and assets
+                blueprint_dict = extraction_data.get("blueprint")
+                assets_data = extraction_data.get("assets", [])
+                metadata = extraction_data.get("metadata", {})
+                
+                logger.info(f"Extraction metadata: {metadata}")
+
+                # Convert blueprint to model
                 blueprint_model = DetectedComponent(**blueprint_dict) if blueprint_dict else None
 
+                # Convert assets to models
                 assets = []
-                def collect_assets(component: DetectedComponent):
-                    if component.asset_url:
-                        assets.append(ExtractedAsset(url=component.asset_url, asset_type=str(component.component_type)))
-                    for child in component.children:
-                        collect_assets(child)
-                
-                if blueprint_model:
-                    collect_assets(blueprint_model)
+                for asset_data in assets_data:
+                    try:
+                        # Handle different asset structures
+                        asset_model = ExtractedAsset(
+                            url=asset_data.get('url'),
+                            content=asset_data.get('content'),
+                            asset_type=asset_data.get('asset_type', 'unknown'),
+                            alt_text=asset_data.get('alt_text'),
+                            dimensions=asset_data.get('dimensions'),
+                            usage_context=asset_data.get('usage_context', [])
+                        )
+                        assets.append(asset_model)
+                    except Exception as e:
+                        logger.warning(f"Failed to create asset model: {e}")
+                        # Create basic asset model
+                        assets.append(ExtractedAsset(
+                            url=asset_data.get('url'),
+                            asset_type=asset_data.get('asset_type', 'unknown')
+                        ))
 
                 extraction_time = time.time() - start_time
                 
@@ -108,10 +126,16 @@ class DOMExtractionService:
                     page_structure=page_structure,
                     blueprint=blueprint_model,
                     assets=assets,
-                    success=True
+                    success=True,
+                    # Add metadata fields
+                    total_elements=metadata.get('total_components', 0),
+                    total_stylesheets=0,  # Will be filled if needed
+                    total_assets=len(assets),
+                    dom_depth=6  # Max depth from our config
                 )
                 
-                logger.info(f"Blueprint extraction completed in {extraction_time:.2f}s")
+                logger.info(f"Enhanced blueprint extraction completed in {extraction_time:.2f}s")
+                logger.info(f"Extracted {len(assets)} assets, {metadata.get('total_components', 0)} components")
                 return result
                 
         except Exception as e:
