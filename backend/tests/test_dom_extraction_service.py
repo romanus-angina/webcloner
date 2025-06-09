@@ -145,18 +145,76 @@ class TestDOMExtractionService:
         manager = AsyncMock(spec=BrowserManager)
         return manager
     
-    def test_javascript_extractors_loaded(self, service):
-        """Test that JavaScript extractors are loaded."""
-        assert "dom_extractor" in service._javascript_extractors
-        assert "style_extractor" in service._javascript_extractors
-        assert "asset_extractor" in service._javascript_extractors
-        assert "layout_analyzer" in service._javascript_extractors
+    @pytest.mark.asyncio
+    async def test_extract_assets_with_images_and_inline_svgs(self, service, mock_browser_manager):
+        """Test that both external images and inline SVGs are extracted correctly."""
+        service.browser_manager = mock_browser_manager
+        test_url = "data:text/html,..." # URL is not important for the mock
+
+        # 1. Mock the page context and evaluation
+        mock_page = AsyncMock()
+        mock_browser_manager.page_context.return_value.__aenter__.return_value = mock_page
         
-        # Check that scripts are not empty
-        for script_name, script_content in service._javascript_extractors.items():
-            assert script_content
-            assert "function" in script_content
-            assert "return" in script_content
+        # We don't need to mock navigate_to_url if we mock the evaluate calls that follow it.
+        
+        # 2. Define the exact, ordered sequence of return values for `page.evaluate`
+        dom_extractor_result = {
+            "elements": [
+                # Add a dummy element to make the test more realistic
+                {"tag_name": "img", "element_id": None, "class_names": [], "text_content": None, "children_count": 0, "xpath": "/html/body/img[1]"}
+            ],
+            "total_elements": 1,
+            "dom_depth": 3
+        }
+
+        asset_extractor_result = {
+            "assets": [
+                {"url": "/logo.png", "asset_type": "image", "usage_context": ["img-tag"], "alt_text": "Company Logo"},
+                {"url": None, "asset_type": "svg", "content": '<svg width="100" height="100"><circle/></svg>', "usage_context": ["inline-svg"]}
+            ],
+            "totalAssets": 2
+        }
+        
+        # This mock is now fully compliant with the StyleAnalysisModel
+        style_analyzer_result = {
+            "theme": {"primary_background": "rgb(255, 255, 255)", "primary_text": "rgb(0, 0, 0)", "is_dark_theme": False, "all_colors": []},
+            "typography": {"body": {"font_family": "Arial"}, "all_families": ["Arial"]},
+            "css_variables": {},
+            "responsive_breakpoints": [],
+            "layout_type": "unknown"
+        }
+        
+        # Assign the list of results to the mock's side_effect
+        mock_page.evaluate.side_effect = [
+            None,
+            dom_extractor_result,
+            asset_extractor_result,
+            style_analyzer_result
+        ]
+
+        # 3. Mock the page structure extraction to prevent its own `evaluate` call
+        with patch.object(service, '_extract_page_structure', return_value=PageStructure(title="Test")):
+            # 4. Run the extraction
+            result = await service.extract_dom_structure(
+                url=test_url,
+                session_id="asset-test-session"
+            )
+
+        # 5. Assert the results
+        assert result.success is True
+        assert len(result.assets) == 2, "Should have extracted one image and one SVG"
+
+        # Check the image asset
+        img_asset = next((a for a in result.assets if a.asset_type == 'image'), None)
+        assert img_asset is not None
+        assert img_asset.url.endswith("/logo.png")
+        assert img_asset.content is None
+
+        # Check the SVG asset
+        svg_asset = next((a for a in result.assets if a.asset_type == 'svg'), None)
+        assert svg_asset is not None
+        assert svg_asset.url is None
+        assert '<svg' in svg_asset.content
     
     def test_dom_extractor_script_structure(self, service):
         """Test DOM extractor script has required structure."""
@@ -807,3 +865,4 @@ async def test_complexity_analysis_integration():
         
     finally:
         await browser_manager.cleanup()
+

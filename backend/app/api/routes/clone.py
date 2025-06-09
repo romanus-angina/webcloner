@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from typing import List, Optional
 from datetime import datetime, UTC
 import logging
-import asyncio # <-- FIX: Added the missing import
+import asyncio 
 
 from ...dependencies import (
     get_app_state, 
     ApplicationState,
     get_browser_manager,
-    validate_session_id  # <-- FIX: Added the missing import
+    validate_session_id  
 )
 from ...models.requests import CloneWebsiteRequest, RefinementRequest
 from ...models.responses import (
@@ -26,6 +26,8 @@ from ...services.component_detector import ComponentDetector
 from ...services.llm_service import llm_service
 from ...services.screenshot_service import screenshot_service, ViewportType
 from ...utils.logger import get_logger
+from ...services.asset_downloader_service import AssetDownloaderService
+from ...services.html_rewriter_service import HTMLRewriterService
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -237,6 +239,16 @@ async def process_clone_request(
         dom_result = await dom_extraction_service.extract_dom_structure(url=str(request.url), session_id=session_id)
         if not dom_result.success:
             raise ProcessingError(f"DOM extraction failed: {dom_result.error_message}")
+        
+        # --- ASSET DOWNLOADING STEP ---
+        await update_progress(session_id, app_state, "Asset Downloading", f"Downloading {len(dom_result.assets)} assets...", CloneStatus.SCRAPING, 20)
+        asset_downloader = AssetDownloaderService(session_id)
+        download_results = await asset_downloader.download_assets(dom_result.assets)
+        await asset_downloader.close()
+        # Create the URL mapping for the rewriter
+        asset_map = {item['original_url']: item['local_path'] for item in download_results}
+
+
 
         await update_progress(session_id, app_state, "Component Detection", "Identifying UI components...", CloneStatus.ANALYZING, 30)
         component_result = ComponentDetector(dom_result).detect_components()
@@ -267,9 +279,14 @@ async def process_clone_request(
         await update_progress(session_id, app_state, "Final Refinement", "Applying visual feedback to the code...", CloneStatus.REFINING, 90)
         refined_html = await llm_service.refine_html_with_feedback(initial_html, feedback)
 
-        final_similarity = llm_service._calculate_similarity_score(component_result, dom_result, refined_html)
+        # --- NEW STEP: REWRITE ASSET PATHS ---
+        rewriter = HTMLRewriterService()
+        final_html = rewriter.rewrite_asset_paths(refined_html, asset_map)
+        # --- END OF NEW STEP ---
+
+        final_similarity = llm_service._calculate_similarity_score(component_result, dom_result, final_html)
         final_result = CloneResult(
-            html_content=refined_html,
+            html_content=final_html,
             similarity_score=final_similarity,
             generation_time=0.0,
             tokens_used=initial_generation.get("tokens_used", 0)

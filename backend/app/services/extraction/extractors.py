@@ -53,30 +53,70 @@ def get_dom_extractor_script() -> str:
     """
 
 def get_asset_extractor_script() -> str:
-    """JavaScript for asset discovery."""
+    """JavaScript for asset discovery, now including inline SVGs."""
     return """
     (() => {
         const assets = [];
         const processedUrls = new Set();
-        function addAsset(url, asset_type, element = null, context = []) {
-            if (!url || processedUrls.has(url)) return;
-            try {
-                const fullUrl = new URL(url, document.baseURI).href;
-                processedUrls.add(fullUrl);
-                const asset = { url: fullUrl, asset_type, usage_context: context };
-                if (element && element.alt) asset.alt_text = element.alt;
-                assets.push(asset);
-            } catch (e) { console.warn(`Invalid asset URL: ${url}`); }
+
+        function addAsset(assetData) {
+            if (assetData.url) {
+                if (!assetData.url || processedUrls.has(assetData.url)) return;
+                try {
+                    const fullUrl = new URL(assetData.url, document.baseURI).href;
+                    processedUrls.add(fullUrl);
+                    assetData.url = fullUrl; // Update with the full URL
+                } catch (e) {
+                    console.warn(`Invalid asset URL: ${assetData.url}`);
+                    return; // Skip invalid URLs
+                }
+            }
+            assets.push(assetData);
         }
-        document.querySelectorAll('img[src]').forEach(img => addAsset(img.src, 'image', img, ['img-tag']));
+
+        // 1. Extract <img> tags
+        document.querySelectorAll('img').forEach(img => {
+            if (img.src) {
+                addAsset({
+                    url: img.src,
+                    asset_type: 'image',
+                    usage_context: ['img-tag'],
+                    alt_text: img.alt
+                });
+            }
+        });
+
+        // 2. Extract inline <svg> elements
+        document.querySelectorAll('svg').forEach((svg, index) => {
+            // Ensure it's not a child of another SVG to avoid duplicates
+            if (svg.parentElement.tagName.toLowerCase() !== 'svg') {
+                addAsset({
+                    url: null, // No URL for inline content
+                    asset_type: 'svg',
+                    usage_context: ['inline-svg'],
+                    content: svg.outerHTML, // Capture the full SVG content
+                    // Create a unique identifier for inline SVGs
+                    alt_text: `inline_svg_${index}`
+                });
+            }
+        });
+
+        // 3. Extract background-images from CSS
         document.querySelectorAll('*').forEach(el => {
             const style = window.getComputedStyle(el);
             if (style.backgroundImage && style.backgroundImage !== 'none') {
                 const urlMatch = style.backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/);
-                if (urlMatch) addAsset(urlMatch[1], 'image', null, ['background-image']);
+                if (urlMatch) {
+                    addAsset({
+                        url: urlMatch[1],
+                        asset_type: 'image',
+                        usage_context: ['background-image']
+                    });
+                }
             }
         });
-        return { assets };
+
+        return { assets, totalAssets: assets.length };
     })()
     """
 

@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from .dom_extraction import ExtractedElementModel
+from .dom_extraction import ExtractedElementModel, ExtractedAssetModel
 
 class ComponentType(str, Enum):
     """Enumeration of detectable UI component types."""
@@ -41,6 +41,8 @@ class DetectedComponent(BaseModel):
         default_factory=dict,
         description="Additional metadata about the component."
     )
+    raw_html: Optional[str] = Field(None, description="The raw outerHTML of the component's root element.")
+    associated_assets: List[ExtractedAssetModel] = Field(default_factory=list, description="Assets associated with this component.")
 
 class ComponentDetectionResult(BaseModel):
     """The result of a component detection process."""

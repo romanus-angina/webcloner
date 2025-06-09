@@ -1,0 +1,154 @@
+{
+  "url": "data:text/html,<html><head><title>Test Page</title></head><body><h1>Test</h1><p>Content</p></body></html>",
+  "session_id": "integration-test",
+  "timestamp": 1749462167.951206,
+  "extraction_time": 3.388093948364258,
+  "page_structure": {
+    "title": "Test Page",
+    "meta_description": null,
+    "meta_keywords": null,
+    "lang": null,
+    "charset": null,
+    "viewport": null,
+    "favicon_url": null,
+    "canonical_url": null,
+    "open_graph": {},
+    "schema_org": []
+  },
+  "elements": [
+    {
+      "tag_name": "html",
+      "element_id": null,
+      "class_names": [],
+      "computed_styles": {},
+      "attributes": {},
+      "text_content": "Test Page",
+      "children_count": 2,
+      "xpath": "/html[1]",
+      "bounding_box": null,
+      "is_visible": true,
+      "z_index": null
+    },
+    {
+      "tag_name": "head",
+      "element_id": null,
+      "class_names": [],
+      "computed_styles": {},
+      "attributes": {},
+      "text_content": "Test Page",
+      "children_count": 1,
+      "xpath": "/html[1]/head[1]",
+      "bounding_box": null,
+      "is_visible": true,
+      "z_index": null
+    },
+    {
+      "tag_name": "title",
+      "element_id": null,
+      "class_names": [],
+      "computed_styles": {},
+      "attributes": {},
+      "text_content": "Test Page",
+      "children_count": 0,
+      "xpath": "/html[1]/head[1]/title[1]",
+      "bounding_box": null,
+      "is_visible": true,
+      "z_index": null
+    },
+    {
+      "tag_name": "body",
+      "element_id": null,
+      "class_names": [],
+      "computed_styles": {},
+      "attributes": {},
+      "text_content": "Test",
+      "children_count": 2,
+      "xpath": "/html/body",
+      "bounding_box": null,
+      "is_visible": true,
+      "z_index": null
+    },
+    {
+      "tag_name": "h1",
+      "element_id": null,
+      "class_names": [],
+      "computed_styles": {},
+      "attributes": {},
+      "text_content": "Test",
+      "children_count": 0,
+      "xpath": "/html/body/h1[1]",
+      "bounding_box": null,
+      "is_visible": true,
+      "z_index": null
+    },
+    {
+      "tag_name": "p",
+      "element_id": null,
+      "class_names": [],
+      "computed_styles": {},
+      "attributes": {},
+      "text_content": "Content",
+      "children_count": 0,
+      "xpath": "/html/body/p[1]",
+      "bounding_box": null,
+      "is_visible": true,
+      "z_index": null
+    }
+  ],
+  "stylesheets": [],
+  "assets": [],
+  "style_analysis": {
+    "theme": {
+      "primary_background": "rgba(0, 0, 0, 0)",
+      "primary_text": "rgb(0, 0, 0)",
+      "accent": null,
+      "secondary_accent": null,
+      "is_dark_theme": true,
+      "all_colors": [
+        "rgb(0, 0, 0)"
+      ]
+    },
+    "typography": {
+      "body": {
+        "font_family": "\"Times New Roman\"",
+        "font_size": "16px",
+        "font_weight": "400",
+        "line_height": "normal",
+        "color": "rgb(0, 0, 0)"
+      },
+      "h1": {
+        "font_family": "\"Times New Roman\"",
+        "font_size": "32px",
+        "font_weight": "700",
+        "line_height": "normal",
+        "color": "rgb(0, 0, 0)"
+      },
+      "h2": {
+        "font_family": null,
+        "font_size": null,
+        "font_weight": null,
+        "line_height": null,
+        "color": null
+      },
+      "h3": {
+        "font_family": null,
+        "font_size": null,
+        "font_weight": null,
+        "line_height": null,
+        "color": null
+      },
+      "all_families": [
+        "Times New Roman"
+      ]
+    },
+    "css_variables": {},
+    "responsive_breakpoints": [],
+    "layout_type": "grid"
+  },
+  "dom_depth": 0,
+  "total_elements": 6,
+  "total_stylesheets": 0,
+  "total_assets": 0,
+  "success": true,
+  "error_message": null
+}

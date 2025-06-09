@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import json
 from fastapi.responses import JSONResponse as BaseJSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.exception_handlers import http_exception_handler
 from contextlib import asynccontextmanager
 import time
@@ -92,6 +93,7 @@ app = FastAPI(
     redoc_url="/redoc" if settings.debug else None,
 )
 
+app.mount("/static", StaticFiles(directory="data"), name="static")
 
 # Add CORS middleware
 app.add_middleware(

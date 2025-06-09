@@ -87,7 +87,13 @@ class DOMExtractionService:
                 
                 logger.info("Extracting Assets...")
                 asset_data = await page.evaluate(self._javascript_extractors["asset_extractor"])
-                assets = [ExtractedAsset(url=urljoin(url, a["url"]), **{k:v for k,v in a.items() if k != 'url'}) for a in asset_data.get("assets", [])]
+                asset_list = asset_data.get("assets", [])
+                assets = []
+                for a in asset_list:
+                    # If it's an external asset with a URL, resolve it to be absolute
+                    if a.get("url"):
+                        a["url"] = urljoin(url, a["url"])
+                    assets.append(ExtractedAsset(**a))
                 
                 logger.info("Performing Style and Layout Analysis...")
                 style_data = await page.evaluate(self._javascript_extractors["style_analyzer"])

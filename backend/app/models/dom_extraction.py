@@ -80,12 +80,13 @@ class ExtractedStylesheetModel(BaseModel):
 
 class ExtractedAssetModel(BaseModel):
     """Model for extracted asset."""
-    url: str = Field(..., description="Asset URL")
-    asset_type: str = Field(..., description="Asset type (image, font, video, etc.)")
+    url: Optional[str] = Field(None, description="Asset URL (if external)") # Make URL optional
+    content: Optional[str] = Field(None, description="Inline asset content (e.g., for SVGs)") # Add content field
+    asset_type: str = Field(..., description="Asset type (image, font, svg, etc.)")
     mime_type: Optional[str] = Field(None, description="MIME type")
     size: Optional[int] = Field(None, description="Asset size in bytes")
     dimensions: Optional[Tuple[int, int]] = Field(None, description="Asset dimensions (width, height)")
-    alt_text: Optional[str] = Field(None, description="Alt text for images")
+    alt_text: Optional[str] = Field(None, description="Alt text for images or identifier for inline assets")
     is_background: bool = Field(default=False, description="Whether asset is used as background")
     usage_context: List[str] = Field(default_factory=list, description="Usage context information")
 

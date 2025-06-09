@@ -140,64 +140,44 @@ class LLMService:
         quality_level: str,
         original_url: str
     ) -> str:
-        style_analysis = dom_result.style_analysis
-        theme_colors = style_analysis.theme
-        typography = style_analysis.typography
         
-        style_summary = self._build_style_summary(theme_colors, typography, style_analysis.css_variables)
-        component_summary = self._build_component_summary(component_result)
-        
-        page_info = {
-            "title": dom_result.page_structure.title or "Cloned Website",
-            "is_dark_theme": theme_colors.is_dark_theme
-        }
-        
-        prompt = f"""You are a world-class front-end developer specializing in creating pixel-perfect HTML replicas from a design system.
-        Your task is to generate a single, self-contained HTML file that is visually identical to the original page.
+        # --- Build a structured blueprint from components ---
+        blueprint_parts = []
+        for component in component_result.components:
+            part = f"--- COMPONENT: {component.component_type.value} ---\n"
+            part += f"INSTRUCTION: Recreate this component using the provided HTML structure and assets.\n"
+            
+            # List associated assets
+            if component.associated_assets:
+                part += "ASSETS TO USE:\n"
+                for asset in component.associated_assets:
+                    if asset.content: # Inline SVG
+                        part += f"- INLINE_SVG: {asset.content}\n"
+                    elif asset.url: # External Image
+                        # Tell the LLM to use the original URL; our rewriter will handle it
+                        part += f"- IMAGE_URL: {asset.url}\n"
+            
+            # Provide the raw HTML structure
+            if component.raw_html:
+                part += "ORIGINAL HTML STRUCTURE:\n"
+                part += f"```html\n{component.raw_html}\n```\n"
+            
+            part += "--- END COMPONENT ---\n\n"
+            blueprint_parts.append(part)
 
-**MUST-FOLLOW INSTRUCTIONS:**
+        blueprint = "".join(blueprint_parts)
 
-1.  **ADHERE TO THE VISUAL STYLE GUIDE:** You must use the colors, fonts, and variables provided below. Do not deviate.
-2.  **RECONSTRUCT THE COMPONENT LAYOUT:** Build the page using the list of detected components in the specified order.
-3.  **SINGLE FILE OUTPUT:** The entire output must be one HTML file with all CSS embedded in a `<style>` tag in the `<head>`.
+        # --- The final, more prescriptive prompt ---
+        prompt = f"""You are an expert front-end developer tasked with creating a high-fidelity HTML replica of a webpage.
 
-**--- VISUAL STYLE GUIDE ---**
-{style_summary}
-**--- END OF STYLE GUIDE ---**
+**PRIMARY DIRECTIVE:**
+Your job is to assemble the following components into a single, cohesive HTML file. You MUST use the provided HTML structures and asset data for each component. Do not invent new structures or ignore the assets. All CSS should be in a single `<style>` tag in the `<head>`.
 
-**--- COMPONENT STRUCTURE ---**
-{component_summary}
-**--- END OF COMPONENT STRUCTURE ---**
+**PAGE BLUEPRINT:**
+{blueprint}
 
-**OUTPUT FORMAT:**
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{page_info['title']}</title>
-    <style>
-        :root {{
-            {self._generate_css_variables(style_analysis.css_variables, theme_colors)}
-        }}
-        
-        body {{
-            background-color: var(--primary-bg, #ffffff);
-            color: var(--primary-text, #000000);
-            font-family: var(--font-body, sans-serif);
-        }}
-
-        /* Your complete CSS implementing the Visual Style Guide goes here. */
-    </style>
-</head>
-<body style="background-color: var(--primary-bg);">
-    <!-- Your HTML structure implementing the component list goes here. -->
-</body>
-</html>
-```
-
-Begin generating the complete HTML file now.
+**FINAL INSTRUCTION:**
+Generate the complete HTML file based on the blueprint above.
 """
         return prompt
     
@@ -227,21 +207,36 @@ Begin generating the complete HTML file now.
         
         return "\n".join(variables)
 
-    def _build_component_summary(self, result: ComponentDetectionResult) -> str:
-        if not result.components:
-            return "No specific components were detected. Analyze the page structure to create a basic layout."
-        
+    def _build_component_summary(self, component_result: ComponentDetectionResult, dom_result: DOMExtractionResult) -> str:
+        """Builds a summary of components and an asset manifest for the LLM."""
+        if not component_result.components and not dom_result.assets:
+            return "No specific components or assets were detected. Create a basic layout based on the page structure."
+
         lines = []
-        counts = {}
-        for comp in result.components:
-            comp_type = comp.component_type.value
-            counts[comp_type] = counts.get(comp_type, 0) + 1
         
-        count_summary = ", ".join([f"{v} {k}(s)" for k, v in counts.items()])
-        lines.append(f"- **Component Summary:** {count_summary}")
-        
-        for comp in result.components[:15]:
-            lines.append(f"  - **{comp.component_type.value.upper()}:** {comp.label or 'No label'}")
+        # Create a manifest of available assets
+        if dom_result.assets:
+            lines.append("- **Asset Manifest (Use these files):**")
+            for asset in dom_result.assets[:15]: # Limit for prompt size
+                if asset.content: # Inline SVG
+                    lines.append(f"  - Inline SVG (identifier: {asset.alt_text}): Use this content directly -> {asset.content}")
+                elif asset.url: # External Image
+                    # NOTE: We will tell the LLM to use the ORIGINAL URL. Our rewriter will handle replacement.
+                    lines.append(f"  - Image: {asset.url} (alt: {asset.alt_text or 'image'})")
+            lines.append("\n")
+
+
+        if component_result.components:
+            counts = {}
+            for comp in component_result.components:
+                comp_type = comp.component_type.value
+                counts[comp_type] = counts.get(comp_type, 0) + 1
+            
+            count_summary = ", ".join([f"{v} {k}(s)" for k, v in counts.items()])
+            lines.append(f"- **Component Summary:** {count_summary}")
+            
+            for comp in component_result.components[:15]:
+                lines.append(f"  - **{comp.component_type.value.upper()}:** {comp.label or 'No label'}")
         
         return "\n".join(lines)
     
