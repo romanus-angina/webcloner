@@ -112,7 +112,7 @@ class ScreenshotService:
         url: Optional[str] = None,
         html_content: Optional[str] = None,
         wait_for_load: bool = True,
-        full_page: bool = True,
+        full_page: bool = False,
         quality: int = 90
     ) -> ScreenshotResult:
         capture_source = url or "html_content"

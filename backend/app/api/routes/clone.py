@@ -253,8 +253,8 @@ async def process_clone_request(
         await update_progress(session_id, app_state, "Visual Comparison", "Taking screenshots for visual analysis...", CloneStatus.REFINING, 70)
         
         viewport = screenshot_service.get_viewport_by_type(ViewportType.DESKTOP)
-        original_shot_task = screenshot_service.capture_screenshot(url=str(request.url), viewport=viewport, session_id=session_id)
-        generated_shot_task = screenshot_service.capture_html_content_screenshot(html_content=initial_html, viewport=viewport, session_id=session_id)
+        original_shot_task = screenshot_service.capture_screenshot(url=str(request.url), viewport=viewport, session_id=session_id, full_page=False)
+        generated_shot_task = screenshot_service.capture_html_content_screenshot(html_content=initial_html, viewport=viewport, session_id=session_id, full_page=False)
         
         original_shot, generated_shot = await asyncio.gather(original_shot_task, generated_shot_task)
 
