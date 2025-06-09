@@ -12,7 +12,6 @@ from ..config import settings
 from ..core.exceptions import (
     BrowserError,
     ProcessingError,
-    NetworkError
 )
 from ..utils.logger import get_logger
 from .browser_manager import BrowserManager
@@ -28,6 +27,7 @@ from ..models.dom_extraction import (
     TypographyAnalysisModel,
     TypographyStyleModel
 )
+from ..models.components import DetectedComponent
 
 
 logger = get_logger(__name__)
@@ -44,62 +44,60 @@ class DOMExtractionService:
     def __init__(self, browser_manager: Optional[BrowserManager] = None):
         self.browser_manager = browser_manager
         self._javascript_extractors = {
-            "dom_extractor": extractors.get_dom_extractor_script(),
-            "asset_extractor": extractors.get_asset_extractor_script(),
-            "style_analyzer": extractors.get_style_extractor_script()
+            "dom_extractor": extractors.get_dom_extractor_script()
         }
     
-    async def _wait_for_dynamic_content(self, page) -> None:
-        """Enhanced waiting strategy for dynamic content."""
-        try:
-            await page.wait_for_load_state("networkidle", timeout=30000)
-            await page.evaluate("new Promise(resolve => setTimeout(resolve, 2000))")
-        except Exception as e:
-            logger.warning(f"Waiting for dynamic content failed, proceeding: {str(e)}")
+    async def _wait_for_dynamic_content(self, page, timeout: int = 5000):
+        """Waits for a period to allow dynamic content to load."""
+        await asyncio.sleep(timeout / 1000)
+
+    async def _extract_page_structure(self, page, url: str) -> PageStructure:
+        """Extracts basic page metadata like title."""
+        title = await page.title()
+        return PageStructure(url=url, title=title)
+
 
     async def extract_dom_structure(
         self,
         url: str,
-        session_id: str,
-        wait_for_load: bool = True,
-        include_computed_styles: bool = True,
-        max_depth: int = 10
+        session_id: str
     ) -> DOMExtractionResult:
-        """Enhanced DOM extraction with structured style analysis."""
+        """
+        Extracts a complete hierarchical blueprint from the page using the
+        injected JavaScript extractor.
+        """
         start_time = time.time()
-        logger.info(f"Starting DOM and Style extraction for {url}")
-        
+        logger.info(f"Starting blueprint extraction for {url}")
+
         if not self.browser_manager:
-            raise BrowserError("Browser manager not available")
-        
+            raise BrowserError("Browser manager not available for DOM extraction")
+
         try:
             async with self.browser_manager.page_context() as page:
                 await self.browser_manager.navigate_to_url(page, url, wait_for="networkidle")
-                
-                if wait_for_load:
-                    await self._wait_for_dynamic_content(page)
+                await self._wait_for_dynamic_content(page)
                 
                 page_structure = await self._extract_page_structure(page, url)
-                
-                logger.info("Extracting DOM elements...")
-                dom_data = await page.evaluate(self._javascript_extractors["dom_extractor"])
-                elements = [ExtractedElement(**elem) for elem in dom_data["elements"]]
-                
-                logger.info("Extracting Assets...")
-                asset_data = await page.evaluate(self._javascript_extractors["asset_extractor"])
-                asset_list = asset_data.get("assets", [])
-                assets = []
-                for a in asset_list:
-                    # If it's an external asset with a URL, resolve it to be absolute
-                    if a.get("url"):
-                        a["url"] = urljoin(url, a["url"])
-                    assets.append(ExtractedAsset(**a))
-                
-                logger.info("Performing Style and Layout Analysis...")
-                style_data = await page.evaluate(self._javascript_extractors["style_analyzer"])
 
-                style_analysis = StyleAnalysisModel(**style_data)
+                logger.info("Executing blueprint extraction script...")
+                extraction_data = await page.evaluate(self._javascript_extractors["dom_extractor"])
                 
+                if not extraction_data or "blueprint" not in extraction_data:
+                    raise ProcessingError("Blueprint extraction script returned invalid data.")
+
+                blueprint_dict = extraction_data["blueprint"]
+                blueprint_model = DetectedComponent(**blueprint_dict) if blueprint_dict else None
+
+                assets = []
+                def collect_assets(component: DetectedComponent):
+                    if component.asset_url:
+                        assets.append(ExtractedAsset(url=component.asset_url, asset_type=str(component.component_type)))
+                    for child in component.children:
+                        collect_assets(child)
+                
+                if blueprint_model:
+                    collect_assets(blueprint_model)
+
                 extraction_time = time.time() - start_time
                 
                 result = DOMExtractionResult(
@@ -108,60 +106,29 @@ class DOMExtractionService:
                     timestamp=time.time(),
                     extraction_time=extraction_time,
                     page_structure=page_structure,
-                    elements=elements,
-                    stylesheets=[],
+                    blueprint=blueprint_model,
                     assets=assets,
-                    style_analysis=style_analysis,
-                    dom_depth=dom_data.get("dom_depth", 0),
-                    total_elements=len(elements),
-                    total_stylesheets=0,
-                    total_assets=len(assets),
                     success=True
                 )
                 
-                logger.info(f"DOM and Style extraction completed in {extraction_time:.2f}s")
+                logger.info(f"Blueprint extraction completed in {extraction_time:.2f}s")
                 return result
                 
         except Exception as e:
-            extraction_time = time.time() - start_time
-            error_msg = f"DOM and Style extraction failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            
-            # Create a default StyleAnalysisModel for the failed case
-            default_style_analysis = StyleAnalysisModel(
-                theme=ColorPaletteModel(),
-                typography=TypographyAnalysisModel(body=TypographyStyleModel()),
-            )
-
+            logger.error(f"Blueprint extraction failed: {str(e)}", exc_info=True)
             return DOMExtractionResult(
                 url=url,
                 session_id=session_id,
                 timestamp=time.time(),
-                extraction_time=extraction_time,
-                success=False,
-                error_message=error_msg,
-                page_structure=PageStructure(),
-                elements=[],
-                stylesheets=[],
+                extraction_time=time.time() - start_time,
+                page_structure=PageStructure(url=url, title="Error"),
+                blueprint=None,
                 assets=[],
-                style_analysis=default_style_analysis
+                success=False,
+                error_message=f"Blueprint extraction failed: {str(e)}"
             )
-    
-    async def _extract_page_structure(self, page, url: str) -> PageStructure:
-        """Extract page metadata and structure information."""
-        try:
-            structure_script = """
-            (() => {
-                const structure = { title: document.title || null, lang: document.documentElement.lang || null };
-                // ... (rest of the script can be shortened for brevity)
-                return structure;
-            })()
-            """
-            structure_data = await page.evaluate(structure_script)
-            return PageStructure(**structure_data)
-        except Exception as e:
-            logger.warning(f"Error extracting page structure: {str(e)}")
-            return PageStructure()
+
+
 
     async def save_extraction_result(self, result: DOMExtractionResult, output_format: str = "json") -> str:
         return await storage.save_extraction_result(result, output_format)

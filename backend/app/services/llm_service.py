@@ -135,49 +135,39 @@ class LLMService:
 
     def _build_generation_prompt(
         self,
-        component_result: ComponentDetectionResult,
+        component_result: ComponentDetectionResult, # This will now contain the full blueprint
         dom_result: DOMExtractionResult,
         quality_level: str,
         original_url: str
     ) -> str:
-        
-        # --- Build a structured blueprint from components ---
-        blueprint_parts = []
-        for component in component_result.components:
-            part = f"--- COMPONENT: {component.component_type.value} ---\n"
-            part += f"INSTRUCTION: Recreate this component using the provided HTML structure and assets.\n"
-            
-            # List associated assets
-            if component.associated_assets:
-                part += "ASSETS TO USE:\n"
-                for asset in component.associated_assets:
-                    if asset.content: # Inline SVG
-                        part += f"- INLINE_SVG: {asset.content}\n"
-                    elif asset.url: # External Image
-                        # Tell the LLM to use the original URL; our rewriter will handle it
-                        part += f"- IMAGE_URL: {asset.url}\n"
-            
-            # Provide the raw HTML structure
-            if component.raw_html:
-                part += "ORIGINAL HTML STRUCTURE:\n"
-                part += f"```html\n{component.raw_html}\n```\n"
-            
-            part += "--- END COMPONENT ---\n\n"
-            blueprint_parts.append(part)
+        """
+        Builds the final, prescriptive prompt for the LLM using the structured JSON blueprint.
+        """
+        # The new dom_extractor script directly returns the blueprint.
+        # The component_result now holds this blueprint.
+        # We need to serialize it to a JSON string for the prompt.
+        json_blueprint = json.dumps(component_result, indent=2)
 
-        blueprint = "".join(blueprint_parts)
+        # The System and User prompt as you designed it.
+        prompt = f"""
+SYSTEM: You are an expert front-end developer. Your sole task is to construct a single, self-contained HTML file by precisely assembling the components provided in a JSON data structure. You must follow all instructions without deviation.
 
-        # --- The final, more prescriptive prompt ---
-        prompt = f"""You are an expert front-end developer tasked with creating a high-fidelity HTML replica of a webpage.
+USER:
+You are provided with a JSON object that represents the complete blueprint for a webpage. Your task is to generate a single HTML file based on this blueprint.
 
-**PRIMARY DIRECTIVE:**
-Your job is to assemble the following components into a single, cohesive HTML file. You MUST use the provided HTML structures and asset data for each component. Do not invent new structures or ignore the assets. All CSS should be in a single `<style>` tag in the `<head>`.
+**Instructions:**
+1.  **Strict Adherence:** You MUST use the `html_snippet`, `relevant_css_rules`, and `children` data provided in the JSON blueprint. Do not invent your own HTML or CSS.
+2.  **Assemble Components:** Construct the final HTML `<body>` by recursively assembling the components from the JSON blueprint.
+3.  **Aggregate CSS:** Combine all the `relevant_css_rules` from all components into a single `<style>` block in the HTML `<head>`.
+4.  **Handle Assets:** For components of type `IMAGE` or `SVG`, use their `html_snippet` directly. For `IMAGE` components with an `asset_url`, use that URL in the `src` attribute. Another system will handle making these links work.
 
-**PAGE BLUEPRINT:**
-{blueprint}
+Here is the JSON blueprint for the webpage:
+
+```json
+{json_blueprint}
 
 **FINAL INSTRUCTION:**
-Generate the complete HTML file based on the blueprint above.
+Generate the complete HTML file based on the  json blueprint above.
 """
         return prompt
     

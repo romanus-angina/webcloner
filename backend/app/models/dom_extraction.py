@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, HttpUrl
 from enum import Enum
-
+from .components import DetectedComponent
 
 class OutputFormat(str, Enum):
     """Output format options for DOM extraction results."""
@@ -146,18 +146,9 @@ class DOMExtractionResultModel(BaseModel):
     
     # Core structure
     page_structure: PageStructureModel = Field(..., description="Page metadata and structure")
-    elements: List[ExtractedElementModel] = Field(..., description="Extracted DOM elements")
-    stylesheets: List[ExtractedStylesheetModel] = Field(..., description="Extracted stylesheets")
+    blueprint: Optional[DetectedComponent] = Field(None, description="The root component of the extracted blueprint.")
     assets: List[ExtractedAssetModel] = Field(..., description="Extracted assets")
     
-    # Analysis data - REPLACED WITH STRUCTURED MODEL
-    style_analysis: StyleAnalysisModel = Field(..., description="Comprehensive style analysis of the page")
-    
-    # Technical metrics
-    dom_depth: int = Field(default=0, description="Maximum DOM depth")
-    total_elements: int = Field(default=0, description="Total number of elements")
-    total_stylesheets: int = Field(default=0, description="Total number of stylesheets")
-    total_assets: int = Field(default=0, description="Total number of assets")
     success: bool = Field(default=True, description="Whether extraction was successful")
     error_message: Optional[str] = Field(None, description="Error message if extraction failed")
 

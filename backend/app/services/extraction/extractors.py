@@ -1,123 +1,82 @@
 def get_dom_extractor_script() -> str:
-    """Enhanced DOM extraction script with a robust XPath generator."""
-    return """
-    (() => {
-        function getXPath(element) {
-            // If the element is null or not an element node, stop.
-            if (!element || element.nodeType !== 1) {
-                return '';
-            }
-            // If the element has a unique ID, use that for a direct path.
-            if (element.id) {
-                return `//*[@id='${element.id}']`;
-            }
-            // The base case: stop at the body tag.
-            if (element === document.body) {
-                return '/html/body';
-            }
-            // Fallback for elements without a parent (like the html element).
-            if (!element.parentNode) {
-                return element.tagName.toLowerCase();
-            }
-
-            let ix = 0;
-            const siblings = element.parentNode.childNodes;
-            for (let i = 0; i < siblings.length; i++) {
-                const sibling = siblings[i];
-                if (sibling === element) {
-                    // Recursively get the path of the parent and append the current element's tag and index.
-                    return getXPath(element.parentNode) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
-                }
-                // Count only element siblings of the same tag.
-                if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
-                    ix++;
-                }
-            }
-        }
-
-        const elements = [];
-        document.querySelectorAll('*').forEach(element => {
-             const tagName = element.tagName.toLowerCase();
-             if (tagName === 'script' || tagName === 'style') return;
-             elements.push({
-                tag_name: tagName,
-                element_id: element.id || null,
-                class_names: element.className && typeof element.className.split === 'function' ? element.className.split(' ').filter(c => c) : [],
-                text_content: element.firstChild?.textContent?.trim() || null,
-                children_count: element.children.length,
-                xpath: getXPath(element)
-             });
-        });
-        return { elements, total_elements: elements.length, dom_depth: 0 };
-    })()
     """
-
-def get_asset_extractor_script() -> str:
-    """JavaScript for asset discovery, now including inline SVGs."""
+    Returns the JavaScript code for advanced DOM, style, and asset extraction.
+    This version returns component types in lowercase to match the Python Enum.
+    """
     return """
     (() => {
-        const assets = [];
-        const processedUrls = new Set();
-
-        function addAsset(assetData) {
-            if (assetData.url) {
-                if (!assetData.url || processedUrls.has(assetData.url)) return;
+        const getAppliedCssRules = (element) => {
+            const sheets = Array.from(document.styleSheets);
+            const rules = [];
+            for (const sheet of sheets) {
                 try {
-                    const fullUrl = new URL(assetData.url, document.baseURI).href;
-                    processedUrls.add(fullUrl);
-                    assetData.url = fullUrl; // Update with the full URL
-                } catch (e) {
-                    console.warn(`Invalid asset URL: ${assetData.url}`);
-                    return; // Skip invalid URLs
+                    if (!sheet.cssRules) continue;
+                    for (const rule of sheet.cssRules) {
+                        // Check for both simple and pseudo-class selectors
+                        if (element.matches(rule.selectorText.split(':')[0])) {
+                            rules.push({
+                                selector: rule.selectorText,
+                                css_text: rule.style.cssText
+                            });
+                        }
+                    }
+                } catch (e) { /* Ignore cross-origin errors */ }
+            }
+            return rules;
+        };
+
+        const getComponentType = (element) => {
+            const tag = element.tagName.toLowerCase();
+            const classList = Array.from(element.classList);
+
+            // Return lowercase strings to match Python Enum
+            if (tag === 'header' || classList.some(c => c.includes('header'))) return 'header';
+            if (tag === 'nav' || classList.some(c => c.includes('nav'))) return 'navbar';
+            if (tag === 'img') return 'image';
+            if (tag === 'svg') return 'svg';
+            if (tag === 'button' || element.getAttribute('role') === 'button') return 'button';
+            if (tag === 'a') return 'link';
+            if (tag === 'form') return 'form';
+            if (tag === 'input' || tag === 'textarea' || tag === 'select') return 'input';
+            if (classList.some(c => c.includes('card'))) return 'card';
+            if (['main', 'section', 'article'].includes(tag)) return 'section';
+            return 'div';
+        };
+
+        const buildComponentTree = (element) => {
+            const tagName = element.tagName.toLowerCase();
+            if (['script', 'style', 'meta', 'link', 'head', 'title'].includes(tagName)) {
+                return null;
+            }
+
+            const componentData = {
+                component_type: getComponentType(element),
+                html_snippet: element.outerHTML.split('>')[0] + '>',
+                relevant_css_rules: getAppliedCssRules(element),
+                children: []
+            };
+
+            if (['image', 'svg'].includes(componentData.component_type)) {
+                componentData.html_snippet = element.outerHTML;
+                if (element.src) {
+                    componentData.asset_url = new URL(element.src, document.baseURI).href;
+                }
+            } else if (['link', 'button'].includes(componentData.component_type)) {
+                componentData.label = element.textContent.trim();
+            }
+
+            for (const child of element.children) {
+                const childComponent = buildComponentTree(child);
+                if (childComponent) {
+                    componentData.children.push(childComponent);
                 }
             }
-            assets.push(assetData);
-        }
+            return componentData;
+        };
 
-        // 1. Extract <img> tags
-        document.querySelectorAll('img').forEach(img => {
-            if (img.src) {
-                addAsset({
-                    url: img.src,
-                    asset_type: 'image',
-                    usage_context: ['img-tag'],
-                    alt_text: img.alt
-                });
-            }
-        });
-
-        // 2. Extract inline <svg> elements
-        document.querySelectorAll('svg').forEach((svg, index) => {
-            // Ensure it's not a child of another SVG to avoid duplicates
-            if (svg.parentElement.tagName.toLowerCase() !== 'svg') {
-                addAsset({
-                    url: null, // No URL for inline content
-                    asset_type: 'svg',
-                    usage_context: ['inline-svg'],
-                    content: svg.outerHTML, // Capture the full SVG content
-                    // Create a unique identifier for inline SVGs
-                    alt_text: `inline_svg_${index}`
-                });
-            }
-        });
-
-        // 3. Extract background-images from CSS
-        document.querySelectorAll('*').forEach(el => {
-            const style = window.getComputedStyle(el);
-            if (style.backgroundImage && style.backgroundImage !== 'none') {
-                const urlMatch = style.backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/);
-                if (urlMatch) {
-                    addAsset({
-                        url: urlMatch[1],
-                        asset_type: 'image',
-                        usage_context: ['background-image']
-                    });
-                }
-            }
-        });
-
-        return { assets, totalAssets: assets.length };
-    })()
+        const blueprint = buildComponentTree(document.body);
+        return { blueprint };
+    })();
     """
 
 def get_style_extractor_script() -> str:

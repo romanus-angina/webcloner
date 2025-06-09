@@ -2,8 +2,6 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from .dom_extraction import ExtractedElementModel, ExtractedAssetModel
-
 class ComponentType(str, Enum):
     """Enumeration of detectable UI component types."""
     BUTTON = "button"
@@ -13,6 +11,11 @@ class ComponentType(str, Enum):
     INPUT = "input"
     IMAGE = "image"
     UNKNOWN = "unknown"
+    LINK = "link"
+    HEADER = "header"
+    SECTION = "section"
+    DIV = "div" # A generic container
+    SVG = "svg"
 
 class DetectedComponent(BaseModel):
     """Represents a detected UI component on the page."""
@@ -22,41 +25,20 @@ class DetectedComponent(BaseModel):
         description="The type of the detected component."
     )
     
-    elements: List[ExtractedElementModel] = Field(
-        ...,
-        description="The list of DOM elements that make up this component."
-    )
+    html_snippet: str = Field(..., description="The opening tag or full HTML for the component.")
     
-    label: Optional[str] = Field(
-        None,
-        description="A descriptive label for the component, e.g., button text."
-    )
-
-    bounding_box: Optional[Dict[str, float]] = Field(
-        None, 
-        description="The aggregated bounding box of all elements in the component."
-    )
-
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional metadata about the component."
-    )
-    raw_html: Optional[str] = Field(None, description="The raw outerHTML of the component's root element.")
-    associated_assets: List[ExtractedAssetModel] = Field(default_factory=list, description="Assets associated with this component.")
+    # NEW: Add fields from your proposed data structure
+    relevant_css_rules: List[Dict[str, str]] = Field(default_factory=list, description="Specific CSS rules that style this component.")
+    children: List['DetectedComponent'] = Field(default_factory=list, description="A list of child components, creating a tree.")
+    
+    # Optional fields
+    label: Optional[str] = Field(None, description="A descriptive label for the component (e.g., button text).")
+    asset_url: Optional[str] = Field(None, description="The URL for an image or other external asset.")
+DetectedComponent.model_rebuild()
 
 class ComponentDetectionResult(BaseModel):
     """The result of a component detection process."""
-
     session_id: str = Field(..., description="The session ID for the detection.")
-    
-    components: List[DetectedComponent] = Field(
-        ...,
-        description="A list of all components detected on the page."
-    )
-
-    total_components: int = Field(..., description="Total number of components found.")
-    
-    detection_time_seconds: float = Field(
-        ..., 
-        description="Time taken for the detection process."
-    )
+    # The 'components' field will now hold the root of the blueprint tree
+    blueprint: Optional[DetectedComponent] = Field(None, description="The root of the component blueprint.")
+    detection_time_seconds: float = Field(..., description="Time taken for the detection process.")

@@ -207,6 +207,12 @@ async def update_progress(session_id: str, app_state: ApplicationState, step_nam
     """Helper to update and log progress."""
     logger.info(f"Session {session_id}: {step_name} - {message}")
     
+    # Ensure progress is always a list
+    session_data = app_state.get_session(session_id)
+    current_progress = session_data.get("progress", [])
+    if not isinstance(current_progress, list):
+        current_progress = []
+
     progress_step = ProgressStep(
         step_name=step_name,
         status=status,
@@ -215,9 +221,12 @@ async def update_progress(session_id: str, app_state: ApplicationState, step_nam
         message=message
     )
     
+    # Append new progress step
+    current_progress.append(progress_step.model_dump())
+    
     app_state.update_session(session_id, {
         "status": status.value,
-        "progress": [progress_step.model_dump()],
+        "progress": current_progress,
         "updated_at": datetime.now(UTC)
     })
 
@@ -226,7 +235,9 @@ async def process_clone_request(
     request: CloneWebsiteRequest,
     app_state: ApplicationState,
 ):
-    """Full cloning pipeline with VQA feedback loop."""
+    """
+    The complete, blueprint-driven cloning pipeline.
+    """
     try:
         browser_manager = get_browser_manager()
         if not browser_manager._is_initialized:
@@ -235,60 +246,65 @@ async def process_clone_request(
         dom_extraction_service.browser_manager = browser_manager
         screenshot_service.browser_manager = browser_manager
         
-        await update_progress(session_id, app_state, "DOM Analysis", "Extracting page structure and styles...", CloneStatus.ANALYZING, 10)
+        # 1. Blueprint Extraction
+        await update_progress(session_id, app_state, "Blueprint Extraction", "Analyzing page structure, styles, and components...", CloneStatus.ANALYZING, 10)
         dom_result = await dom_extraction_service.extract_dom_structure(url=str(request.url), session_id=session_id)
         if not dom_result.success:
-            raise ProcessingError(f"DOM extraction failed: {dom_result.error_message}")
-        
-        # --- ASSET DOWNLOADING STEP ---
-        await update_progress(session_id, app_state, "Asset Downloading", f"Downloading {len(dom_result.assets)} assets...", CloneStatus.SCRAPING, 20)
+            raise ProcessingError(f"Blueprint extraction failed: {dom_result.error_message}")
+
+        # CORRECTED: Access the 'blueprint' attribute directly from the dom_result.
+        blueprint = dom_result.blueprint
+        if not blueprint:
+            raise ProcessingError("Extraction returned an empty blueprint.")
+
+        # 2. Asset Downloading
+        await update_progress(session_id, app_state, "Asset Downloading", f"Downloading {len(dom_result.assets)} image assets...", CloneStatus.SCRAPING, 25)
         asset_downloader = AssetDownloaderService(session_id)
         download_results = await asset_downloader.download_assets(dom_result.assets)
         await asset_downloader.close()
-        # Create the URL mapping for the rewriter
-        asset_map = {item['original_url']: item['local_path'] for item in download_results}
+        asset_map = {item['original_url']: item['local_path'] for item in download_results if item.get('success')}
 
-
-
-        await update_progress(session_id, app_state, "Component Detection", "Identifying UI components...", CloneStatus.ANALYZING, 30)
-        component_result = ComponentDetector(dom_result).detect_components()
-
-        await update_progress(session_id, app_state, "Initial Generation", "Creating first version of the website...", CloneStatus.GENERATING, 50)
+        # 3. Initial Generation from Blueprint
+        await update_progress(session_id, app_state, "HTML Assembly", "AI is assembling the initial HTML from the blueprint...", CloneStatus.GENERATING, 40)
+        # Note: We now pass the blueprint object directly to the LLM service.
         initial_generation = await llm_service.generate_html_from_components(
-            component_result=component_result,
+            component_result=blueprint,
             dom_result=dom_result,
             original_url=str(request.url),
             quality_level=request.quality
         )
         initial_html = initial_generation["html_content"]
 
-        await update_progress(session_id, app_state, "Visual Comparison", "Taking screenshots for visual analysis...", CloneStatus.REFINING, 70)
-        
+        # 4. Visual QA - Screenshotting
+        await update_progress(session_id, app_state, "Visual Comparison", "Capturing screenshots for visual analysis...", CloneStatus.REFINING, 60)
         viewport = screenshot_service.get_viewport_by_type(ViewportType.DESKTOP)
-        original_shot_task = screenshot_service.capture_screenshot(url=str(request.url), viewport=viewport, session_id=session_id, full_page=False)
-        generated_shot_task = screenshot_service.capture_html_content_screenshot(html_content=initial_html, viewport=viewport, session_id=session_id, full_page=False)
+        original_shot_task = screenshot_service.capture_screenshot(url=str(request.url), viewport=viewport, session_id=session_id, full_page=True)
+        generated_shot_task = screenshot_service.capture_html_content_screenshot(html_content=initial_html, viewport=viewport, session_id=session_id, full_page=True)
         
         original_shot, generated_shot = await asyncio.gather(original_shot_task, generated_shot_task)
 
         if not original_shot.success or not generated_shot.success:
             raise ProcessingError(f"Failed to capture screenshots for VQA. Original: {original_shot.error}, Generated: {generated_shot.error}")
 
-        await update_progress(session_id, app_state, "QA Analysis", "AI is visually comparing the websites...", CloneStatus.REFINING, 80)
+        # 5. Visual QA - AI Feedback
+        await update_progress(session_id, app_state, "AI Quality Analysis", "AI is visually inspecting the clone for differences...", CloneStatus.REFINING, 75)
         feedback = await llm_service.analyze_visual_differences(original_shot.file_path, generated_shot.file_path)
 
-        await update_progress(session_id, app_state, "Final Refinement", "Applying visual feedback to the code...", CloneStatus.REFINING, 90)
+        # 6. Refinement based on Feedback
+        await update_progress(session_id, app_state, "Final Refinement", "Applying visual feedback to the HTML and CSS...", CloneStatus.REFINING, 90)
         refined_html = await llm_service.refine_html_with_feedback(initial_html, feedback)
 
-        # --- NEW STEP: REWRITE ASSET PATHS ---
+        # 7. Final Asset Path Rewriting
+        await update_progress(session_id, app_state, "Finalizing Assets", "Linking local assets into the final code...", CloneStatus.COMPLETED, 95)
         rewriter = HTMLRewriterService()
-        final_html = rewriter.rewrite_asset_paths(refined_html, asset_map)
-        # --- END OF NEW STEP ---
+        final_html_with_local_assets = rewriter.rewrite_asset_paths(refined_html, asset_map)
 
-        final_similarity = llm_service._calculate_similarity_score(component_result, dom_result, final_html)
+        # 8. Completion
+        final_similarity = llm_service._calculate_similarity_score(blueprint, dom_result, final_html_with_local_assets)
         final_result = CloneResult(
-            html_content=final_html,
+            html_content=final_html_with_local_assets,
             similarity_score=final_similarity,
-            generation_time=0.0,
+            generation_time=0,
             tokens_used=initial_generation.get("tokens_used", 0)
         )
         
