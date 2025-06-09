@@ -61,8 +61,8 @@ class LLMService:
                 
                 response = await asyncio.to_thread(
                     client.messages.create,
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=8000,
+                    model="claude-3-5-sonnet-20240620",
+                    max_tokens=4096,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
                 )
@@ -167,7 +167,7 @@ class LLMService:
                 "tokens_used": usage.input_tokens + usage.output_tokens,
                 "components_replicated": self._count_replicated_components(component_result, html_content),
                 "quality_level": quality_level,
-                "model_used": "claude-3-5-sonnet-20241022",
+                "model_used": "claude-3-5-sonnet-20240620",
                 "style_analysis_used": True
             }
             
@@ -264,8 +264,7 @@ class LLMService:
         </style>
     </head>
     <body>
-        <!-- Your HTML structure here -->
-    </body>
+        </body>
     </html>
     ```
 

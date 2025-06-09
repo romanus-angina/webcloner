@@ -14,8 +14,9 @@ from ...dependencies import (
     ApplicationState
 )
 from ...config import settings
-from ...services.dom_extraction_service import DOMExtractionService, DOMExtractionResult
+from ...services.dom_extraction_service import DOMExtractionService
 from ...services.browser_manager import BrowserManager
+from ...services.extraction import analyzer, storage
 from ...models.dom_extraction import (
     DOMExtractionRequest,
     DOMExtractionResponse,
@@ -25,7 +26,8 @@ from ...models.dom_extraction import (
     DOMExtractionInfoResponse,
     DOMExtractionSessionInfo,
     DOMExtractionFileInfo,
-    DOMRegenerationRequest
+    DOMRegenerationRequest,
+    DOMExtractionResultModel
 )
 from ...core.exceptions import ValidationError, ProcessingError
 import logging
@@ -61,7 +63,7 @@ async def extract_dom_structure(
         
         # Perform extraction
         result = await extraction_service.extract_dom_structure(
-            url=request.url,
+            url=str(request.url),
             session_id=request.session_id,
             wait_for_load=request.wait_for_load,
             include_computed_styles=request.include_computed_styles,
@@ -69,16 +71,16 @@ async def extract_dom_structure(
         )
 
         if result.success:
-            from dataclasses import asdict
-            result_dict = asdict(result)
+            result_model = DOMExtractionResultModel(**result.__dict__)
         else:
-            result_dict = None
+            result_model = None
+            
         # Save result if requested
         saved_file_path = None
-        if request.save_result:
-            saved_file_path = await extraction_service.save_extraction_result(
-                result, 
-                output_format=request.output_format
+        if request.save_result and result.success:
+            saved_file_path = await storage.save_extraction_result(
+                result_model, 
+                output_format=request.output_format.value
             )
         
         # Update session state with extraction info
@@ -89,7 +91,7 @@ async def extract_dom_structure(
             "total_elements": result.total_elements,
             "total_stylesheets": result.total_stylesheets,
             "total_assets": result.total_assets,
-            "last_extraction_result": result.__dict__ if result.success else None
+            "last_extraction_result": result_model.model_dump() if result_model else None
         })
         
         logger.info(
@@ -102,7 +104,7 @@ async def extract_dom_structure(
             success=result.success,
             message=f"Extracted {result.total_elements} elements successfully" if result.success 
                    else f"Extraction failed: {result.error_message}",
-            extraction_result=result_dict,
+            extraction_result=result_model,
             saved_file_path=saved_file_path,
             session_id=request.session_id,
             timestamp=datetime.now(UTC)
@@ -123,8 +125,7 @@ async def extract_dom_structure(
 
 @router.get("/session/{session_id}/status", response_model=DOMExtractionStatusResponse)
 async def get_extraction_status(
-    session_id: str = Depends(validate_session_id),
-    browser_manager: BrowserManager = Depends(get_browser_manager)
+    session_id: str = Depends(validate_session_id)
 ):
     """
     Get DOM extraction status and information for a specific session.
@@ -135,9 +136,7 @@ async def get_extraction_status(
     Returns:
         DOM extraction status and file information
     """
-    extraction_service = DOMExtractionService(browser_manager)
-    
-    extraction_info = await extraction_service.get_extraction_info(session_id)
+    extraction_info = await storage.get_extraction_info(session_id)
     
     # Convert to response models
     extraction_models = []
@@ -152,14 +151,14 @@ async def get_extraction_status(
     
     session_info = DOMExtractionSessionInfo(
         session_id=extraction_info["session_id"],
-        extraction_count=extraction_info["extraction_count"],
+        extraction_count=len(extraction_models),
         total_size=extraction_info["total_size"],
         extractions=extraction_models
     )
     
     return DOMExtractionStatusResponse(
         session_id=session_id,
-        status="available" if extraction_info["extraction_count"] > 0 else "no_extractions",
+        status="available" if len(extraction_models) > 0 else "no_extractions",
         extraction_info=session_info,
         timestamp=datetime.now(UTC)
     )
@@ -188,7 +187,7 @@ async def analyze_page_complexity(
         
         # Perform lightweight extraction for complexity analysis
         result = await extraction_service.extract_dom_structure(
-            url=request.url,
+            url=str(request.url),
             session_id=request.session_id,
             wait_for_load=request.wait_for_load,
             include_computed_styles=False,  # Skip detailed styles for faster analysis
@@ -198,8 +197,10 @@ async def analyze_page_complexity(
         if not result.success:
             raise ProcessingError(f"Failed to extract page for analysis: {result.error_message}")
         
+        result_model = DOMExtractionResultModel(**result.__dict__)
+
         # Analyze complexity
-        complexity_analysis = await extraction_service.analyze_page_complexity(result)
+        complexity_analysis = await analyzer.analyze_page_complexity(result_model)
         
         logger.info(f"Complexity analysis completed for {request.url}: score {complexity_analysis['overall_score']:.1f}")
         
@@ -234,7 +235,6 @@ async def analyze_page_complexity(
 @router.delete("/session/{session_id}/extractions", response_model=DOMExtractionCleanupResponse)
 async def cleanup_session_extractions(
     session_id: str = Depends(validate_session_id),
-    browser_manager: BrowserManager = Depends(get_browser_manager),
     logger: logging.Logger = Depends(get_logger)
 ):
     """
@@ -246,14 +246,12 @@ async def cleanup_session_extractions(
     Returns:
         Cleanup results
     """
-    extraction_service = DOMExtractionService(browser_manager)
-    
     # Get current info for calculating freed space
-    before_info = await extraction_service.get_extraction_info(session_id)
+    before_info = await storage.get_extraction_info(session_id)
     total_size_before = before_info["total_size"]
     
     # Perform cleanup
-    cleaned_count = await extraction_service.cleanup_extractions(session_id=session_id)
+    cleaned_count = await storage.cleanup_extractions(session_id=session_id)
     
     logger.info(f"Cleaned up {cleaned_count} extraction files for session {session_id}")
     
@@ -268,7 +266,6 @@ async def cleanup_session_extractions(
 @router.delete("/cleanup", response_model=DOMExtractionCleanupResponse)
 async def cleanup_old_extractions(
     older_than_hours: int = Query(default=24, ge=1),
-    browser_manager: BrowserManager = Depends(get_browser_manager),
     logger: logging.Logger = Depends(get_logger)
 ):
     """
@@ -280,8 +277,6 @@ async def cleanup_old_extractions(
     Returns:
         Cleanup results
     """
-    extraction_service = DOMExtractionService(browser_manager)
-    
     # Get total size before cleanup for calculating freed space
     extractions_dir = Path(settings.temp_storage_path) / "extractions"
     total_size_before = 0
@@ -294,7 +289,7 @@ async def cleanup_old_extractions(
                 pass
     
     # Perform cleanup
-    cleaned_count = await extraction_service.cleanup_extractions(
+    cleaned_count = await storage.cleanup_extractions(
         older_than_hours=older_than_hours
     )
     
@@ -355,8 +350,7 @@ async def regenerate_extraction(
     logger.info(f"Regenerating DOM extraction for session {session_id}, URL: {url}")
     
     # Clean up existing extractions first
-    extraction_service = DOMExtractionService(browser_manager)
-    await extraction_service.cleanup_extractions(session_id=session_id)
+    await storage.cleanup_extractions(session_id=session_id)
     
     # Create new extraction request with session ID
     new_request = DOMExtractionRequest(
@@ -371,8 +365,9 @@ async def regenerate_extraction(
     
     # Use the main extract endpoint logic
     try:
+        extraction_service = DOMExtractionService(browser_manager)
         result = await extraction_service.extract_dom_structure(
-            url=new_request.url,
+            url=str(new_request.url),
             session_id=new_request.session_id,
             wait_for_load=new_request.wait_for_load,
             include_computed_styles=new_request.include_computed_styles,
@@ -380,17 +375,17 @@ async def regenerate_extraction(
         )
         
         if result.success:
-            from dataclasses import asdict
-            result_dict = asdict(result)
+            result_dict = result.__dict__
         else:
             result_dict = None
         # Save result if requested
 
         saved_file_path = None
-        if new_request.save_result:
-            saved_file_path = await extraction_service.save_extraction_result(
-                result, 
-                output_format=new_request.output_format
+        if new_request.save_result and result.success:
+            result_model = DOMExtractionResultModel(**result_dict)
+            saved_file_path = await storage.save_extraction_result(
+                result_model, 
+                output_format=new_request.output_format.value
             )
         
         return DOMExtractionResponse(
@@ -417,7 +412,6 @@ async def regenerate_extraction(
 
 @router.get("/stats")
 async def get_extraction_statistics(
-    browser_manager: BrowserManager = Depends(get_browser_manager)
 ):
     """
     Get global DOM extraction statistics.

@@ -2,9 +2,8 @@ import time
 from typing import List, Dict, Optional, Any, Set
 from dataclasses import asdict
 
-from .dom_extraction_service import DOMExtractionResult, ExtractedElement
+from ..models.dom_extraction import DOMExtractionResultModel as DOMExtractionResult, ExtractedElementModel as ExtractedElement
 from ..models.components import DetectedComponent, ComponentType, ComponentDetectionResult
-from ..models.dom_extraction import ExtractedElementModel 
 
 class ComponentDetector:
     """
@@ -107,7 +106,7 @@ class ComponentDetector:
                         processed_elements.add(nav_el.xpath)
                 
                 # Convert to dictionaries for Pydantic validation
-                element_dicts = [asdict(el) for el in navbar_elements]
+                element_dicts = [el.model_dump() for el in navbar_elements]
                 
                 navbars.append(DetectedComponent(
                     component_type=ComponentType.NAVBAR,
@@ -161,7 +160,7 @@ class ComponentDetector:
                         processed_elements.add(form_el.xpath)
                 
                 # Convert to dictionaries for Pydantic validation
-                element_dicts = [asdict(el) for el in form_elements]
+                element_dicts = [el.model_dump() for el in form_elements]
                 
                 forms.append(DetectedComponent(
                     component_type=ComponentType.FORM,
@@ -199,7 +198,7 @@ class ComponentDetector:
 
             if is_button:
                 processed_elements.add(element.xpath)
-                element_dict = asdict(element)
+                element_dict = element.model_dump()
                 buttons.append(DetectedComponent(
                     component_type=ComponentType.BUTTON,
                     elements=[element_dict],
@@ -220,7 +219,7 @@ class ComponentDetector:
             tag = element.tag_name.lower()
             if tag in ['input', 'textarea', 'select'] and element.attributes.get('type') not in ['submit', 'button', 'reset', 'hidden']:
                 processed_elements.add(element.xpath)
-                element_dict = asdict(element)
+                element_dict = element.model_dump()
                 inputs.append(DetectedComponent(
                     component_type=ComponentType.INPUT,
                     elements=[element_dict],
@@ -287,7 +286,7 @@ class ComponentDetector:
 
             if is_card:
                 processed_elements.add(element.xpath)
-                element_dict = asdict(element)
+                element_dict = element.model_dump()
                 
                 cards.append(DetectedComponent(
                     component_type=ComponentType.CARD,
