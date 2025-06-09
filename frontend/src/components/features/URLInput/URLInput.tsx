@@ -31,7 +31,7 @@ const qualityOptions = [
   },
   {
     value: 'balanced' as const,
-    label: 'Balanced',
+    label: 'Balanced', 
     description: 'Good quality with reasonable speed',
     icon: Clock,
     time: '~2m'
@@ -44,6 +44,32 @@ const qualityOptions = [
     time: '~5m'
   }
 ];
+
+const DebugButton = ({ formData, isLoading, urlError }: any) => {
+  const isFormValid = formData.url.trim().length > 0 && !urlError;
+  
+  console.log('Debug Info:', {
+    url: formData.url,
+    urlLength: formData.url.trim().length,
+    urlError,
+    isLoading,
+    isFormValid
+  });
+
+  return (
+    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded text-sm">
+      <strong>Debug Info:</strong>
+      <ul className="mt-2 space-y-1">
+        <li>URL: "{formData.url}"</li>
+        <li>URL Length: {formData.url.trim().length}</li>
+        <li>URL Error: {urlError || 'None'}</li>
+        <li>Is Loading: {isLoading ? 'Yes' : 'No'}</li>
+        <li>Is Form Valid: {isFormValid ? 'Yes' : 'No'}</li>
+        <li>Button Should Be: {isFormValid && !isLoading ? 'ENABLED' : 'DISABLED'}</li>
+      </ul>
+    </div>
+  );
+};
 
 export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
   const [formData, setFormData] = useState<URLInputData>({
@@ -75,17 +101,21 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
       return;
     }
 
+    console.log('Submitting form data:', formData);
     onSubmit(formData);
   };
+
+  // Check if form is valid
+  const isFormValid = formData.url.trim().length > 0 && !urlError;
 
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-gray-900">
           <Globe className="w-6 h-6 text-blue-600" />
           Clone Any Website
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="text-gray-700 font-medium">
           Enter a website URL to create an aesthetically similar HTML replica using AI
         </CardDescription>
       </CardHeader>
@@ -107,13 +137,14 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
           </div>
 
           {/* Quality Selection */}
-          <div className="space-y-3">
-            <label className="text-sm font-medium text-gray-700">
+          <div className="space-y-4">
+            <label className="text-sm font-semibold text-gray-900 block">
               Clone Quality
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {qualityOptions.map((option) => {
                 const Icon = option.icon;
+                const isSelected = formData.quality === option.value;
                 return (
                   <button
                     key={option.value}
@@ -121,22 +152,34 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
                     onClick={() => setFormData(prev => ({ ...prev, quality: option.value }))}
                     disabled={isLoading}
                     className={`
-                      p-4 rounded-lg border-2 text-left transition-all
-                      ${formData.quality === option.value
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
+                      p-4 rounded-lg border-2 text-left transition-all relative
+                      ${isSelected
+                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                        : 'border-gray-300 hover:border-gray-400 bg-white hover:bg-gray-50'
                       }
                       ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                     `}
                   >
-                    <div className="flex items-center gap-3 mb-2">
+                    <div className="flex items-center gap-3 mb-3">
                       <Icon className={`w-5 h-5 ${
-                        formData.quality === option.value ? 'text-blue-600' : 'text-gray-500'
+                        isSelected ? 'text-blue-600' : 'text-gray-600'
                       }`} />
-                      <span className="font-medium">{option.label}</span>
-                      <span className="text-xs text-gray-500 ml-auto">{option.time}</span>
+                      <span className={`font-semibold ${
+                        isSelected ? 'text-blue-900' : 'text-gray-900'
+                      }`}>
+                        {option.label}
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-full ml-auto ${
+                        isSelected ? 'bg-blue-200 text-blue-800' : 'bg-gray-200 text-gray-700'
+                      }`}>
+                        {option.time}
+                      </span>
                     </div>
-                    <p className="text-sm text-gray-600">{option.description}</p>
+                    <p className={`text-sm leading-relaxed ${
+                      isSelected ? 'text-blue-800' : 'text-gray-700'
+                    }`}>
+                      {option.description}
+                    </p>
                   </button>
                 );
               })}
@@ -144,12 +187,12 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
           </div>
 
           {/* Options */}
-          <div className="space-y-3">
-            <label className="text-sm font-medium text-gray-700">
+          <div className="space-y-4">
+            <label className="text-sm font-semibold text-gray-900 block">
               Include Elements
             </label>
-            <div className="space-y-2">
-              <label className="flex items-center gap-3">
+            <div className="space-y-3 bg-gray-50 p-4 rounded-lg">
+              <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={formData.include_images}
@@ -158,11 +201,11 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
                     include_images: e.target.checked 
                   }))}
                   disabled={isLoading}
-                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 focus:ring-2"
                 />
-                <span className="text-sm">Include Images</span>
+                <span className="text-sm font-medium text-gray-900">Include Images</span>
               </label>
-              <label className="flex items-center gap-3">
+              <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={formData.include_styling}
@@ -171,16 +214,16 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
                     include_styling: e.target.checked 
                   }))}
                   disabled={isLoading}
-                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 focus:ring-2"
                 />
-                <span className="text-sm">Include CSS Styling</span>
+                <span className="text-sm font-medium text-gray-900">Include CSS Styling</span>
               </label>
             </div>
           </div>
 
-          {/* Custom Instructions */}
+          {/* Custom Instructions - Enhanced */}
           <div>
-            <label className="text-sm font-medium text-gray-700 block mb-2">
+            <label className="text-sm font-semibold text-gray-900 block mb-3">
               Custom Instructions (Optional)
             </label>
             <textarea
@@ -191,11 +234,11 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
               }))}
               disabled={isLoading}
               placeholder="Any specific requirements or preferences..."
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm ring-offset-white placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              className="w-full h-24 rounded-md border-2 border-gray-300 px-4 py-3 text-base font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50 bg-white resize-none"
               rows={3}
               maxLength={500}
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs font-medium text-gray-600 mt-2">
               {formData.custom_instructions?.length || 0}/500 characters
             </p>
           </div>
@@ -203,9 +246,12 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
           {/* Submit Button */}
           <Button
             type="submit"
-            className="w-full"
-            size="lg"
-            disabled={isLoading || !formData.url.trim()}
+            className={`w-full h-12 text-base font-semibold transition-all ${
+              isFormValid && !isLoading
+                ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+            }`}
+            disabled={!isFormValid || isLoading}
           >
             {isLoading ? (
               <>
@@ -216,6 +262,15 @@ export function URLInput({ onSubmit, isLoading = false }: URLInputProps) {
               'Start Cloning'
             )}
           </Button>
+
+          <DebugButton formData={formData} isLoading={isLoading} urlError={urlError} />
+
+          {/* Form Status */}
+          {!isFormValid && formData.url.trim().length > 0 && (
+            <p className="text-sm text-red-600 text-center">
+              Please enter a valid URL to continue
+            </p>
+          )}
         </form>
       </CardContent>
     </Card>

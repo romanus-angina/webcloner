@@ -3,7 +3,7 @@
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { CheckCircle, XCircle, Clock, Download, Eye, Trash2 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Download, Eye, Trash2, Zap } from 'lucide-react';
 import { type CloneStatus } from '@/services/api';
 import { truncateUrl } from '@/utils/helpers';
 
@@ -16,6 +16,11 @@ interface StatusCardProps {
   onDownload?: () => void;
   onDelete?: () => void;
   similarityScore?: number;
+  componentAnalysis?: {
+    total_components: number;
+    detection_time: number;
+    components_replicated: Record<string, number>;
+  };
 }
 
 export function StatusCard({
@@ -26,7 +31,8 @@ export function StatusCard({
   onView,
   onDownload,
   onDelete,
-  similarityScore
+  similarityScore,
+  componentAnalysis
 }: StatusCardProps) {
   const getStatusDisplay = () => {
     switch (status) {
@@ -71,7 +77,7 @@ export function StatusCard({
   return (
     <Card className="w-full">
       <CardContent className="p-4">
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* Header */}
           <div className="flex items-start justify-between">
             <div className="flex-1 min-w-0">
@@ -88,13 +94,47 @@ export function StatusCard({
             </div>
           </div>
 
-          {/* Similarity Score */}
-          {similarityScore !== undefined && status === 'completed' && (
-            <div className="text-sm">
-              <span className="text-gray-500">Similarity Score: </span>
-              <span className="font-medium text-green-600">
-                {Math.round(similarityScore)}%
-              </span>
+          {/* Metrics Grid */}
+          {status === 'completed' && (
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              {/* Similarity Score */}
+              {similarityScore !== undefined && (
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-gray-600">Similarity:</span>
+                  <span className="font-medium text-green-600">
+                    {Math.round(similarityScore)}%
+                  </span>
+                </div>
+              )}
+
+              {/* Component Analysis */}
+              {componentAnalysis && (
+                <div className="flex items-center gap-2">
+                  <Zap className="w-3 h-3 text-blue-500" />
+                  <span className="text-gray-600">Components:</span>
+                  <span className="font-medium text-blue-600">
+                    {componentAnalysis.total_components}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Component Breakdown */}
+          {status === 'completed' && componentAnalysis?.components_replicated && (
+            <div className="bg-gray-50 rounded-lg p-3">
+              <div className="text-xs font-medium text-gray-700 mb-2">Components Detected</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(componentAnalysis.components_replicated).map(([type, count]) => (
+                  <span 
+                    key={type}
+                    className="px-2 py-1 bg-white rounded text-xs text-gray-600 border"
+                  >
+                    {count} {type}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 

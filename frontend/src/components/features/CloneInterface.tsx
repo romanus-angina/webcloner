@@ -1,3 +1,4 @@
+// Updated CloneInterface with better contrast for the info cards
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -16,17 +17,19 @@ import { AlertCircle, CheckCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 type ViewState = 'input' | 'processing' | 'results' | 'error';
 
 interface CloneInterfaceState {
-  view: ViewState;
-  currentSession: CloneResponse | null;
-  pollingInterval: NodeJS.Timeout | null;
-  showCode: boolean;
-  logs: Array<{
-    timestamp: string;
-    level: 'info' | 'warning' | 'error';
-    message: string;
-    details?: string;
-  }>;
-}
+    view: ViewState;
+    currentSession: CloneResponse | null;
+    pollingInterval: NodeJS.Timeout | null;
+    showCode: boolean;
+    originalUrl: string; // ADD THIS - store the original URL
+    logs: Array<{
+      timestamp: string;
+      level: 'info' | 'warning' | 'error';
+      message: string;
+      details?: string;
+    }>;
+  }
+
 
 export function CloneInterface() {
   const { isLoading, data, error, cloneWebsite, getStatus, reset } = useCloning();
@@ -35,6 +38,7 @@ export function CloneInterface() {
     currentSession: null,
     pollingInterval: null,
     showCode: false,
+    originalUrl: '', // ADD THIS
     logs: []
   });
 
@@ -56,23 +60,30 @@ export function CloneInterface() {
     try {
       addLog('info', `Starting clone process for ${inputData.url}`);
       
+      // STORE THE ORIGINAL URL
+      setState(prev => ({
+        ...prev,
+        originalUrl: inputData.url // ADD THIS LINE
+      }));
+      
       const request = {
         url: inputData.url,
         quality: inputData.quality,
         include_images: inputData.include_images,
         include_styling: inputData.include_styling,
-        max_depth: 1, // Single page for now
+        max_depth: 1,
         custom_instructions: inputData.custom_instructions || undefined
       };
-
+  
       const response = await cloneWebsite(request);
       
       setState(prev => ({
         ...prev,
         view: 'processing',
         currentSession: response
+        // originalUrl is already set above
       }));
-
+  
       addLog('info', `Clone process initiated with session ID: ${response.session_id}`);
       startPolling(response.session_id);
       
@@ -82,6 +93,7 @@ export function CloneInterface() {
       setState(prev => ({ ...prev, view: 'error' }));
     }
   };
+  
 
   // Start polling for status updates
   const startPolling = (sessionId: string) => {
@@ -98,9 +110,8 @@ export function CloneInterface() {
           currentSession: response
         }));
 
-        // Check if process is complete
         if (response.status === 'completed') {
-          addLog('info', 'Clone process completed successfully');
+          addLog('info', `Clone process completed successfully! Similarity: ${response.result?.similarity_score?.toFixed(1)}%`);
           setState(prev => ({
             ...prev,
             view: 'results',
@@ -115,12 +126,16 @@ export function CloneInterface() {
             pollingInterval: null
           }));
           clearInterval(interval);
+        } else {
+          const currentStep = response.progress?.[response.progress.length - 1];
+          if (currentStep?.message) {
+            addLog('info', `${currentStep.step_name}: ${currentStep.message}`);
+          }
         }
       } catch (err) {
         addLog('warning', 'Failed to get status update');
-        // Continue polling - don't stop on temporary errors
       }
-    }, 2000); // Poll every 2 seconds
+    }, 3000);
 
     setState(prev => ({
       ...prev,
@@ -128,7 +143,6 @@ export function CloneInterface() {
     }));
   };
 
-  // Cleanup polling on unmount
   useEffect(() => {
     return () => {
       if (state.pollingInterval) {
@@ -137,7 +151,6 @@ export function CloneInterface() {
     };
   }, [state.pollingInterval]);
 
-  // Handle starting over
   const handleStartOver = () => {
     if (state.pollingInterval) {
       clearInterval(state.pollingInterval);
@@ -149,11 +162,11 @@ export function CloneInterface() {
       currentSession: null,
       pollingInterval: null,
       showCode: false,
+      originalUrl: '', // CLEAR THE URL
       logs: []
     });
   };
 
-  // Handle download
   const handleDownload = () => {
     if (!state.currentSession?.result?.html_content) return;
 
@@ -172,7 +185,6 @@ export function CloneInterface() {
     addLog('info', 'Website downloaded successfully');
   };
 
-  // Handle manual refresh
   const handleRefresh = async () => {
     if (!state.currentSession?.session_id) return;
 
@@ -188,38 +200,53 @@ export function CloneInterface() {
     }
   };
 
-  // Render based on current view state
+  const getOriginalUrl = () => {
+    return state.originalUrl || 'https://example.com';
+  };
+
   const renderContent = () => {
     switch (state.view) {
       case 'input':
         return (
-          <div className="max-w-4xl mx-auto space-y-6">
+          <div className="max-w-4xl mx-auto space-y-8">
             <URLInput onSubmit={handleCloneSubmit} isLoading={isLoading} />
             
-            {/* Quick Info */}
-            <Card>
-              <CardContent className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-                  <div>
-                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
-                      <span className="text-2xl">🌐</span>
+            {/* Enhanced Info Cards with Better Contrast */}
+            <Card className="bg-white border-gray-200 shadow-sm">
+              <CardContent className="p-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+                  <div className="space-y-4">
+                    <div className="w-16 h-16 bg-blue-500 rounded-xl flex items-center justify-center mx-auto">
+                      <span className="text-3xl">🌐</span>
                     </div>
-                    <h3 className="font-medium">Enter URL</h3>
-                    <p className="text-sm text-gray-600">Paste any public website URL</p>
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-900 mb-2">Enter URL</h3>
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        Paste any public website URL to get started with AI-powered cloning
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
-                      <span className="text-2xl">🤖</span>
+                  <div className="space-y-4">
+                    <div className="w-16 h-16 bg-green-500 rounded-xl flex items-center justify-center mx-auto">
+                      <span className="text-3xl">🤖</span>
                     </div>
-                    <h3 className="font-medium">AI Analysis</h3>
-                    <p className="text-sm text-gray-600">Our AI analyzes the design</p>
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-900 mb-2">AI Analysis</h3>
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        Our AI analyzes the design and detects UI components automatically
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
-                      <span className="text-2xl">✨</span>
+                  <div className="space-y-4">
+                    <div className="w-16 h-16 bg-purple-500 rounded-xl flex items-center justify-center mx-auto">
+                      <span className="text-3xl">✨</span>
                     </div>
-                    <h3 className="font-medium">Get Clone</h3>
-                    <p className="text-sm text-gray-600">Download your HTML replica</p>
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-900 mb-2">Get Clone</h3>
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        Download your clean, semantic HTML replica instantly
+                      </p>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -230,7 +257,6 @@ export function CloneInterface() {
       case 'processing':
         return (
           <div className="max-w-4xl mx-auto space-y-6">
-            {/* Header */}
             <div className="flex items-center justify-between">
               <Button variant="ghost" onClick={handleStartOver}>
                 <ArrowLeft className="w-4 h-4 mr-2" />
@@ -242,7 +268,6 @@ export function CloneInterface() {
               </Button>
             </div>
 
-            {/* Progress Tracking */}
             {state.currentSession && (
               <ProgressTracker
                 steps={state.currentSession.progress}
@@ -253,69 +278,73 @@ export function CloneInterface() {
               />
             )}
 
-            {/* Log Viewer */}
             <LogViewer logs={state.logs} />
           </div>
         );
 
-      case 'results':
-        return (
-          <div className="max-w-6xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-                <div>
-                  <h1 className="text-xl font-semibold">Clone Completed Successfully!</h1>
-                  <p className="text-gray-600">Your website clone is ready</p>
+        case 'results':
+          return (
+            <div className="max-w-6xl mx-auto space-y-6">
+              {/* Enhanced Header with Better Contrast */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-6 rounded-lg border shadow-sm">
+                <div className="flex items-center gap-4">
+                  <CheckCircle className="w-8 h-8 text-green-600" />
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Clone Completed Successfully!</h1>
+                    <p className="text-gray-700 font-medium">Your website clone is ready for download</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setState(prev => ({ ...prev, showCode: !prev.showCode }))}
+                    className="font-semibold text-gray-900 border-gray-400 hover:bg-gray-100"
+                  >
+                    {state.showCode ? 'Hide Code' : 'View Code'}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={handleStartOver}
+                    className="font-semibold text-gray-900 border-gray-400 hover:bg-gray-100"
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Clone Another
+                  </Button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setState(prev => ({ ...prev, showCode: !prev.showCode }))}>
-                  {state.showCode ? 'Hide Code' : 'View Code'}
-                </Button>
-                <Button variant="outline" onClick={handleStartOver}>
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Clone Another
-                </Button>
-              </div>
-            </div>
-
-            {/* Results Display */}
-            {state.currentSession?.result && (
-              <>
-                {/* Comparison View */}
-                <ComparisonView
-                  originalUrl={state.currentSession.request?.url || ''}
-                  generatedHtml={state.currentSession.result.html_content}
-                  similarityScore={state.currentSession.result.similarity_score}
-                  onDownload={handleDownload}
-                />
-
-                {/* Code Viewer (conditional) */}
-                {state.showCode && (
-                  <CodeViewer
-                    htmlContent={state.currentSession.result.html_content}
-                    cssContent={state.currentSession.result.css_content}
+        
+              {/* Rest of results content... */}
+              {state.currentSession?.result && (
+                <>
+                  <ComparisonView
+                    originalUrl={getOriginalUrl()}
+                    generatedHtml={state.currentSession.result.html_content}
+                    similarityScore={state.currentSession.result.similarity_score}
                     onDownload={handleDownload}
                   />
-                )}
-              </>
-            )}
-
-            {/* Session Info */}
-            {state.currentSession && (
-              <StatusCard
-                sessionId={state.currentSession.session_id}
-                url={state.currentSession.request?.url || 'Unknown URL'}
-                status={state.currentSession.status}
-                createdAt={state.currentSession.created_at}
-                similarityScore={state.currentSession.result?.similarity_score}
-                onDownload={handleDownload}
-              />
-            )}
-          </div>
-        );
+        
+                  {state.showCode && (
+                    <CodeViewer
+                      htmlContent={state.currentSession.result.html_content}
+                      cssContent={state.currentSession.result.css_content}
+                      onDownload={handleDownload}
+                    />
+                  )}
+                </>
+              )}
+        
+              {state.currentSession && (
+                <StatusCard
+                  sessionId={state.currentSession.session_id}
+                  url={getOriginalUrl()}
+                  status={state.currentSession.status}
+                  createdAt={state.currentSession.created_at}
+                  similarityScore={state.currentSession.result?.similarity_score}
+                  onDownload={handleDownload}
+                />
+              )}
+            </div>
+          );
 
       case 'error':
         return (

@@ -47,6 +47,8 @@ class ApiClient {
     };
 
     try {
+      console.log(`API Request: ${config.method || 'GET'} ${url}`);
+      
       const response = await fetch(url, config);
       
       if (!response.ok) {
@@ -61,6 +63,8 @@ class ApiClient {
           };
         }
         
+        console.error('API Error:', errorData);
+        
         throw new ApiError(
           errorData.message || 'Request failed',
           response.status,
@@ -69,12 +73,15 @@ class ApiClient {
         );
       }
 
-      return await response.json();
+      const data = await response.json();
+      console.log('API Response:', data);
+      return data;
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
       }
       
+      console.error('Network Error:', error);
       throw new ApiError(
         error instanceof Error ? error.message : 'Network error occurred',
         0,

@@ -55,14 +55,14 @@ export function ComparisonView({
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-gray-900 text-xl font-bold">
               <Eye className="w-5 h-5" />
               Website Comparison
             </CardTitle>
             {similarityScore !== undefined && (
-              <p className="text-sm text-gray-600 mt-1">
+              <p className="text-sm text-gray-800 font-medium mt-1">
                 Similarity Score: 
-                <span className="font-medium text-green-600 ml-1">
+                <span className="font-bold text-green-600 ml-1 text-base">
                   {Math.round(similarityScore)}%
                 </span>
               </p>
@@ -71,7 +71,7 @@ export function ComparisonView({
           
           <div className="flex items-center gap-2">
             {onDownload && (
-              <Button size="sm" variant="outline" onClick={onDownload}>
+              <Button size="sm" variant="outline" onClick={onDownload} className="font-semibold">
                 <Download className="w-4 h-4 mr-1" />
                 Download
               </Button>
@@ -85,20 +85,20 @@ export function ComparisonView({
           <div className="flex rounded-lg border p-1">
             <button
               onClick={() => setViewMode('side-by-side')}
-              className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded text-sm font-semibold transition-colors ${
                 viewMode === 'side-by-side'
                   ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-900'
+                  : 'text-gray-700 hover:text-gray-900'
               }`}
             >
               Side by Side
             </button>
             <button
               onClick={() => setViewMode('tabs')}
-              className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded text-sm font-semibold transition-colors ${
                 viewMode === 'tabs'
                   ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-900'
+                  : 'text-gray-700 hover:text-gray-900'
               }`}
             >
               Tabs
@@ -149,14 +149,14 @@ export function ComparisonView({
           <div className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Original Website */}
-              <div className="space-y-2">
-                <h3 className="font-medium text-gray-700 flex items-center gap-2">
+              <div className="space-y-3">
+                <h3 className="font-bold text-gray-900 flex items-center gap-2 text-base">
                   <div className="w-3 h-3 bg-blue-500 rounded-full" />
                   Original Website
                 </h3>
                 <div className={`${getDeviceClass()}`}>
                   <PreviewFrame
-                    title="Original"
+                    title="Original Website"
                     src={originalUrl}
                     height={getFrameHeight()}
                   />
@@ -164,14 +164,14 @@ export function ComparisonView({
               </div>
 
               {/* Generated Website */}
-              <div className="space-y-2">
-                <h3 className="font-medium text-gray-700 flex items-center gap-2">
+              <div className="space-y-3">
+                <h3 className="font-bold text-gray-900 flex items-center gap-2 text-base">
                   <div className="w-3 h-3 bg-green-500 rounded-full" />
                   Generated Clone
                 </h3>
                 <div className={`${getDeviceClass()}`}>
                   <PreviewFrame
-                    title="Generated"
+                    title="Generated Clone"
                     content={generatedHtml}
                     height={getFrameHeight()}
                   />
@@ -185,20 +185,20 @@ export function ComparisonView({
             <div className="flex border-b">
               <button
                 onClick={() => setActiveTab('original')}
-                className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${
                   activeTab === 'original'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-600 hover:text-gray-900'
+                    ? 'border-blue-500 text-blue-700'
+                    : 'border-transparent text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Original Website
               </button>
               <button
                 onClick={() => setActiveTab('generated')}
-                className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${
                   activeTab === 'generated'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-600 hover:text-gray-900'
+                    ? 'border-blue-500 text-blue-700'
+                    : 'border-transparent text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Generated Clone
@@ -209,13 +209,13 @@ export function ComparisonView({
             <div className={`${getDeviceClass()}`}>
               {activeTab === 'original' ? (
                 <PreviewFrame
-                  title="Original"
+                  title="Original Website"
                   src={originalUrl}
                   height={getFrameHeight()}
                 />
               ) : (
                 <PreviewFrame
-                  title="Generated"
+                  title="Generated Clone"
                   content={generatedHtml}
                   height={getFrameHeight()}
                 />

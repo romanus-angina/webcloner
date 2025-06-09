@@ -27,7 +27,7 @@ const statusIcons: Record<CloneStatus, React.ComponentType<{ className?: string 
 };
 
 const statusColors: Record<CloneStatus, string> = {
-  pending: 'text-gray-500',
+  pending: 'text-gray-600',
   analyzing: 'text-blue-600',
   scraping: 'text-blue-600',
   generating: 'text-blue-600',
@@ -79,10 +79,10 @@ export function ProgressTracker({
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <StatusIcon className={`w-5 h-5 ${statusColor}`} />
-            <span>Cloning Progress</span>
+            <span className="text-gray-900 font-bold">Cloning Progress</span>
           </div>
           {sessionId && (
-            <span className="text-sm font-normal text-gray-500">
+            <span className="text-sm font-medium text-gray-700">
               ID: {sessionId.slice(0, 8)}...
             </span>
           )}
@@ -93,8 +93,8 @@ export function ProgressTracker({
         {/* Overall Progress */}
         <div>
           <div className="flex justify-between items-center mb-2">
-            <span className={`font-medium ${statusColor}`}>{statusLabel}</span>
-            <span className="text-sm text-gray-500">
+            <span className={`font-bold text-base ${statusColor}`}>{statusLabel}</span>
+            <span className="text-sm font-semibold text-gray-800">
               {Math.round(overallProgress)}%
             </span>
           </div>
@@ -106,14 +106,14 @@ export function ProgressTracker({
           <div className="grid grid-cols-2 gap-4 text-sm">
             {getElapsedTime() && (
               <div>
-                <span className="text-gray-500">Elapsed:</span>
-                <div className="font-medium">{getElapsedTime()}</div>
+                <span className="text-gray-700 font-semibold">Elapsed:</span>
+                <div className="font-bold text-gray-900 text-base">{getElapsedTime()}</div>
               </div>
             )}
             {getEstimatedRemaining() && (
               <div>
-                <span className="text-gray-500">Remaining:</span>
-                <div className="font-medium">{getEstimatedRemaining()}</div>
+                <span className="text-gray-700 font-semibold">Remaining:</span>
+                <div className="font-bold text-gray-900 text-base">{getEstimatedRemaining()}</div>
               </div>
             )}
           </div>
@@ -122,7 +122,7 @@ export function ProgressTracker({
         {/* Step Details */}
         {steps.length > 0 && (
           <div className="space-y-3">
-            <h4 className="font-medium text-gray-700">Detailed Steps</h4>
+            <h4 className="font-bold text-gray-900">Detailed Steps</h4>
             <div className="space-y-2">
               {steps.map((step, index) => (
                 <StepIndicator key={index} step={step} />
@@ -147,7 +147,7 @@ function StepIndicator({ step }: StepIndicatorProps) {
       case 'failed':
         return <XCircle className="w-4 h-4 text-red-600" />;
       case 'pending':
-        return <Clock className="w-4 h-4 text-gray-400" />;
+        return <Clock className="w-4 h-4 text-gray-500" />;
       default:
         return <Loading size="sm" className="text-blue-600" />;
     }
@@ -156,30 +156,30 @@ function StepIndicator({ step }: StepIndicatorProps) {
   const getStepColor = () => {
     switch (step.status) {
       case 'completed':
-        return 'text-green-700 bg-green-50 border-green-200';
+        return 'text-green-800 bg-green-50 border-green-200';
       case 'failed':
-        return 'text-red-700 bg-red-50 border-red-200';
+        return 'text-red-800 bg-red-50 border-red-200';
       case 'pending':
-        return 'text-gray-600 bg-gray-50 border-gray-200';
+        return 'text-gray-700 bg-gray-50 border-gray-200';
       default:
-        return 'text-blue-700 bg-blue-50 border-blue-200';
+        return 'text-blue-800 bg-blue-50 border-blue-200';
     }
   };
 
   return (
-    <div className={`p-3 rounded-lg border ${getStepColor()}`}>
+    <div className={`p-4 rounded-lg border ${getStepColor()}`}>
       <div className="flex items-center gap-3">
         {getStepIcon()}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <span className="font-medium">{step.step_name}</span>
-            <span className="text-sm">{Math.round(step.progress_percentage)}%</span>
+            <span className="font-bold text-base">{step.step_name}</span>
+            <span className="text-sm font-semibold">{Math.round(step.progress_percentage)}%</span>
           </div>
           {step.message && (
-            <p className="text-sm opacity-75 mt-1">{step.message}</p>
+            <p className="text-sm font-medium mt-1">{step.message}</p>
           )}
           {step.error && (
-            <p className="text-sm text-red-600 mt-1 flex items-center gap-1">
+            <p className="text-sm text-red-700 font-medium mt-1 flex items-center gap-1">
               <AlertCircle className="w-3 h-3" />
               {step.error}
             </p>
@@ -187,11 +187,11 @@ function StepIndicator({ step }: StepIndicatorProps) {
         </div>
       </div>
       {step.progress_percentage > 0 && (
-        <div className="mt-2">
+        <div className="mt-3">
           <ProgressBar 
             value={step.progress_percentage} 
             showPercentage={false}
-            className="h-1"
+            className="h-2"
           />
         </div>
       )}

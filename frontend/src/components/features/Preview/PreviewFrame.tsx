@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 
@@ -35,13 +35,17 @@ export function PreviewFrame({ title, src, content, height = 'h-96' }: PreviewFr
 
   const getSrcDoc = () => {
     if (content) {
-      return content;
+      // Ensure the content is valid HTML
+      const validHtml = content.startsWith('<!DOCTYPE html') || content.startsWith('<html') 
+        ? content 
+        : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Generated Clone</title></head><body>${content}</body></html>`;
+      return validHtml;
     }
     return undefined;
   };
 
   return (
-    <div className={`relative border rounded-lg overflow-hidden ${height}`}>
+    <div className={`relative border rounded-lg overflow-hidden ${height} bg-white`}>
       {/* Loading State */}
       {isLoading && (
         <div className="absolute inset-0 bg-white flex items-center justify-center z-10">
@@ -59,12 +63,20 @@ export function PreviewFrame({ title, src, content, height = 'h-96' }: PreviewFr
             <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-3" />
             <h3 className="font-medium text-gray-900 mb-2">Failed to load {title.toLowerCase()}</h3>
             <p className="text-sm text-gray-600 mb-4">
-              {src ? 'The website could not be loaded.' : 'The generated content could not be displayed.'}
+              {src ? 'The website could not be loaded in the preview.' : 'The generated content could not be displayed.'}
             </p>
-            <Button size="sm" variant="outline" onClick={handleRefresh}>
-              <RefreshCw className="w-4 h-4 mr-1" />
-              Try Again
-            </Button>
+            <div className="flex gap-2 justify-center">
+              <Button size="sm" variant="outline" onClick={handleRefresh}>
+                <RefreshCw className="w-4 h-4 mr-1" />
+                Try Again
+              </Button>
+              {src && (
+                <Button size="sm" variant="outline" onClick={() => window.open(src, '_blank')}>
+                  <ExternalLink className="w-4 h-4 mr-1" />
+                  Open in New Tab
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -78,8 +90,9 @@ export function PreviewFrame({ title, src, content, height = 'h-96' }: PreviewFr
         className="w-full h-full border-0"
         onLoad={handleLoad}
         onError={handleError}
-        sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-presentation"
         loading="lazy"
+        style={{ backgroundColor: 'white' }}
       />
     </div>
   );

@@ -39,11 +39,11 @@ export function LogViewer({ logs, maxHeight = '300px' }: LogViewerProps) {
   const getLevelColor = (level: LogEntry['level']) => {
     switch (level) {
       case 'info':
-        return 'text-blue-600';
+        return 'text-blue-700';
       case 'warning':
-        return 'text-yellow-600';
+        return 'text-yellow-700';
       case 'error':
-        return 'text-red-600';
+        return 'text-red-700';
     }
   };
 
@@ -55,11 +55,12 @@ export function LogViewer({ logs, maxHeight = '300px' }: LogViewerProps) {
     <Card className="w-full">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">Process Logs</CardTitle>
+          <CardTitle className="text-lg font-bold text-gray-900">Process Logs</CardTitle>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setIsExpanded(!isExpanded)}
+            className="font-semibold"
           >
             {isExpanded ? (
               <>
@@ -86,10 +87,11 @@ export function LogViewer({ logs, maxHeight = '300px' }: LogViewerProps) {
                 size="sm"
                 variant={selectedLevel === level ? 'default' : 'outline'}
                 onClick={() => setSelectedLevel(level as any)}
+                className="font-semibold"
               >
                 {level.charAt(0).toUpperCase() + level.slice(1)}
                 {level !== 'all' && (
-                  <span className="ml-1 text-xs">
+                  <span className="ml-1 text-xs font-bold">
                     ({logs.filter(log => log.level === level).length})
                   </span>
                 )}
@@ -99,33 +101,33 @@ export function LogViewer({ logs, maxHeight = '300px' }: LogViewerProps) {
 
           {/* Log Entries */}
           <div 
-            className="space-y-2 overflow-y-auto border rounded-md p-3 bg-gray-50"
+            className="space-y-2 overflow-y-auto border-2 border-gray-200 rounded-md p-4 bg-gray-50"
             style={{ maxHeight }}
           >
             {filteredLogs.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-4">
+              <p className="text-sm text-gray-600 text-center py-4 font-medium">
                 No logs for selected level
               </p>
             ) : (
               filteredLogs.map((log, index) => (
-                <div key={index} className="flex gap-3 text-sm">
+                <div key={index} className="flex gap-3 text-sm bg-white p-3 rounded border">
                   {getLevelIcon(log.level)}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs font-semibold text-gray-600">
                         {new Date(log.timestamp).toLocaleTimeString()}
                       </span>
-                      <span className={`font-medium ${getLevelColor(log.level)}`}>
+                      <span className={`font-bold text-xs ${getLevelColor(log.level)}`}>
                         {log.level.toUpperCase()}
                       </span>
                     </div>
-                    <p className="text-gray-700">{log.message}</p>
+                    <p className="text-gray-900 font-medium">{log.message}</p>
                     {log.details && (
-                      <details className="mt-1">
-                        <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-700">
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-gray-700 hover:text-gray-900 font-semibold">
                           View details
                         </summary>
-                        <pre className="mt-1 text-xs bg-white p-2 rounded border overflow-x-auto">
+                        <pre className="mt-2 text-xs bg-gray-100 p-2 rounded border overflow-x-auto font-mono text-gray-800">
                           {log.details}
                         </pre>
                       </details>

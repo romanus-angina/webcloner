@@ -252,7 +252,7 @@ class DOMExtractionService:
         """        
     
     def _get_asset_extractor_script(self) -> str:
-        """JavaScript for asset discovery."""
+        """JavaScript for asset discovery - FIXED version."""
         return """
         (() => {
             function extractAssets() {
@@ -265,13 +265,13 @@ class DOMExtractionService:
                     
                     const asset = {
                         url: url,
-                        asset_type: type,
+                        asset_type: type,  // FIXED: was assetType, now asset_type
                         usage_context: context,
                         is_background: false
                     };
                     
                     if (element) {
-                        if (element.alt) asset.altText = element.alt;
+                        if (element.alt) asset.alt_text = element.alt;  // FIXED: was altText
                         if (element.naturalWidth && element.naturalHeight) {
                             asset.dimensions = [element.naturalWidth, element.naturalHeight];
                         }
@@ -298,7 +298,7 @@ class DOMExtractionService:
                             if (urlMatch) {
                                 const asset = {
                                     url: urlMatch[1],
-                                    asset_type: 'image',
+                                    asset_type: 'image',  // FIXED: was assetType
                                     usage_context: ['background-image'],
                                     is_background: true
                                 };
@@ -315,45 +315,60 @@ class DOMExtractionService:
                 }
                 
                 // Extract fonts
-                const fontUrls = new Set();
-                for (let stylesheet of document.styleSheets) {
-                    try {
-                        for (let rule of stylesheet.cssRules) {
-                            if (rule.type === CSSRule.FONT_FACE_RULE) {
-                                const src = rule.style.src;
-                                if (src) {
-                                    const urlMatches = src.match(/url\\(["']?([^"')]+)["']?\\)/g);
-                                    if (urlMatches) {
-                                        urlMatches.forEach(match => {
-                                            const url = match.match(/url\\(["']?([^"')]+)["']?\\)/)[1];
-                                            addAsset(url, 'font', null, ['font-face']);
-                                        });
+                try {
+                    for (let stylesheet of document.styleSheets) {
+                        try {
+                            for (let rule of stylesheet.cssRules) {
+                                if (rule.type === CSSRule.FONT_FACE_RULE) {
+                                    const src = rule.style.src;
+                                    if (src) {
+                                        const urlMatches = src.match(/url\\(["']?([^"')]+)["']?\\)/g);
+                                        if (urlMatches) {
+                                            urlMatches.forEach(match => {
+                                                const url = match.match(/url\\(["']?([^"')]+)["']?\\)/)[1];
+                                                addAsset(url, 'font', null, ['font-face']);
+                                            });
+                                        }
                                     }
                                 }
                             }
+                        } catch (e) {
+                            // Can't access cross-origin stylesheets
                         }
-                    } catch (e) {
-                        // Can't access cross-origin stylesheets
                     }
+                } catch (e) {
+                    // StyleSheets access failed
                 }
                 
                 // Extract videos and audio
-                const videos = document.querySelectorAll('video[src], video source[src]');
-                for (let video of videos) {
-                    addAsset(video.src, 'video', null, ['video-tag']);
-                }
-                
-                const audios = document.querySelectorAll('audio[src], audio source[src]');
-                for (let audio of audios) {
-                    addAsset(audio.src, 'audio', null, ['audio-tag']);
+                try {
+                    const videos = document.querySelectorAll('video[src], video source[src]');
+                    for (let video of videos) {
+                        if (video.src) {
+                            addAsset(video.src, 'video', null, ['video-tag']);
+                        }
+                    }
+                    
+                    const audios = document.querySelectorAll('audio[src], audio source[src]');
+                    for (let audio of audios) {
+                        if (audio.src) {
+                            addAsset(audio.src, 'audio', null, ['audio-tag']);
+                        }
+                    }
+                } catch (e) {
+                    // Media element access failed
                 }
                 
                 // Extract favicons and icons
-                const icons = document.querySelectorAll('link[rel*="icon"]');
-                for (let icon of icons) {
-                    if (icon.href) {
-                        addAsset(icon.href, 'icon', null, ['favicon']);
+                try {
+                    const icons = document.querySelectorAll('link[rel*="icon"]');
+                    for (let icon of icons) {
+                        if (icon.href) {
+                            addAsset(icon.href, 'icon', null, ['favicon']);
+                        }
                     }
+                } catch (e) {
+                    // Icon extraction failed
                 }
                 
                 return {
@@ -620,19 +635,23 @@ class DOMExtractionService:
                 logger.info("Extracting assets...")
                 asset_data = await page.evaluate(self._javascript_extractors["asset_extractor"])
                 raw_assets = asset_data["assets"]
-                
-                # Convert and resolve asset URLs
+
+                # Convert and resolve asset URLs - FIXED VERSION
                 assets = []
-                for asset_data in raw_assets:
-                    asset = ExtractedAsset(
-                        url=urljoin(url, asset_data["url"]),
-                        asset_type=asset_data["assetType"],
-                        is_background=asset_data.get("isBackground", False),
-                        usage_context=asset_data.get("usageContext", []),
-                        alt_text=asset_data.get("altText"),
-                        dimensions=tuple(asset_data["dimensions"]) if asset_data.get("dimensions") else None
-                    )
-                    assets.append(asset)
+                for asset_info in raw_assets:
+                    try:
+                        asset = ExtractedAsset(
+                            url=urljoin(url, asset_info["url"]),
+                            asset_type=asset_info["asset_type"],  # FIXED: was assetType
+                            is_background=asset_info.get("is_background", False),
+                            usage_context=asset_info.get("usage_context", []),
+                            alt_text=asset_info.get("alt_text"),  # FIXED: was altText
+                            dimensions=tuple(asset_info["dimensions"]) if asset_info.get("dimensions") else None
+                        )
+                        assets.append(asset)
+                    except Exception as e:
+                        logger.warning(f"Failed to process asset {asset_info.get('url', 'unknown')}: {str(e)}")
+                        continue
                 
                 # Analyze layout
                 logger.info("Analyzing layout...")
